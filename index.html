@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SMILES → IUPAC (CDK, in your browser)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Generate algorithmic IUPAC names from SMILES using CDK in the browser via CheerpJ. No server.">
+  <style>
+    :root { --bg: #0b1020; --card:#121831; --text:#e9eefc; --muted:#9fb0d6; --accent:#6aa3ff; --ok:#36cfc9; --err:#ff6a6a; }
+    html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+    .wrap { max-width: 900px; margin: 40px auto; padding: 0 16px; }
+    .card { background:var(--card); border-radius:16px; box-shadow: 0 10px 30px rgba(0,0,0,0.35); padding: 20px; }
+    h1 { font-size: clamp(20px, 2.5vw, 28px); margin: 0 0 8px; }
+    p.tag { color: var(--muted); margin: 0 0 16px; }
+    textarea, input[type=text] { width:100%; padding:12px 14px; background:#0c1328; color:var(--text); border:1px solid #1e2a55; border-radius:10px; outline:none; }
+    textarea { min-height:120px; resize:vertical; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .btn { padding:10px 14px; background:#1a2650; color:var(--text); border:1px solid #2a3a78; border-radius:10px; cursor:pointer; }
+    .btn:hover { background:#213062; }
+    .btn.primary { background:linear-gradient(135deg, #427bff, #6aa3ff); border:none; }
+    .btn.ghost { background:transparent; border:1px dashed #30407e; }
+    .status { margin-top: 12px; font-size: 13px; color: var(--muted); }
+    .out { white-space: pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
+    .small { font-size: 12px; color: var(--muted); }
+    .warn { color: #ffd166; }
+    .ok { color: var(--ok); }
+    .err { color: var(--err); }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+    .badge { padding: 3px 8px; border-radius: 999px; background: #0c1328; border:1px solid #2a3a78; margin-left:8px; font-size:11px;}
+    .kbd { padding:2px 6px; border-radius:6px; background:#0c1328; border:1px solid #2a3a78; }
+  </style>
+  <!-- CheerpJ v3 runtime (CDN) -->
+  <script src="https://cjrtnc.leaningtech.com/3.0rc2/cj3loader.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>SMILES → IUPAC (algorithmic, offline)</h1>
+      <p class="tag">Runs <strong>CDK</strong> entirely in your browser via <strong>CheerpJ</strong>. No server calls.</p>
+      <p class="small">Tip: works best with <em>isomeric SMILES</em>. Extremely complex fused/bridged systems may yield partial names — that’s a CDK limitation, not the page.</p>
+      <label for="smiles" class="small">Isomeric SMILES</label>
+      <textarea id="smiles" placeholder="Paste an isomeric SMILES string here..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button id="run" class="btn primary">Generate IUPAC</button>
+        <button id="copy" class="btn">Copy output</button>
+        <button id="clear" class="btn ghost">Clear</button>
+        <span id="cjStatus" class="badge">Runtime: <span id="cjState">not loaded</span></span>
+      </div>
+      <div id="status" class="status">Waiting for input…</div>
+      <div id="output" class="out"></div>
+      <div class="footer">
+        <span>CDK IUPACNameGenerator • CheerpJ 3</span>
+        <span class="badge">No server</span>
+        <span class="badge">Static page</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h3 style="margin-top:0;">Setup (first time only)</h3>
+      <p class="small">For GitHub Pages, add <code class="kbd">/lib/cdk-bundle-2.9.jar</code> to your repo (from Maven Central). The page will load ~10–20&nbsp;MB of Java classes on first use.</p>
+      <ol class="small">
+        <li>Download <code>cdk-bundle-2.9.jar</code> from Maven Central and place it at <code>/lib/cdk-bundle-2.9.jar</code> in your repo.</li>
+        <li>Enable GitHub Pages (Settings → Pages → Deploy from branch).</li>
+        <li>Open your site. First load can take ~10–30s depending on network; subsequent loads are cached by the browser.</li>
+      </ol>
+      <p class="warn small">Note: In-browser IUPAC generation is experimental; for guaranteed PIN-grade names, use commercial namers.</p>
+    </div>
+  </div>
+
+<script>
+  const smilesEl = document.getElementById('smiles');
+  const outEl = document.getElementById('output');
+  const statusEl = document.getElementById('status');
+  const cjState = document.getElementById('cjState');
+
+  let cdkReadyPromise = null;
+
+  function log(msg, cls) {
+    const span = document.createElement('div');
+    span.textContent = msg;
+    if (cls) span.className = cls;
+    outEl.appendChild(span);
+  }
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  async function initCheerpJAndCDK() {
+    if (cdkReadyPromise) return cdkReadyPromise;
+    cdkReadyPromise = new Promise(async (resolve, reject) => {
+      try {
+        cjState.textContent = 'loading…';
+        setStatus('Loading CheerpJ runtime…');
+        await cheerpjInit();
+
+        // Load CDK bundle jar from /lib (must exist in the repo)
+        setStatus('Loading CDK classes (first load can take a while)…');
+        await cheerpjRunLibrary("/app/lib/cdk-bundle-2.9.jar");
+
+        cjState.textContent = 'ready';
+        setStatus('Runtime ready. Paste a SMILES and click Generate.');
+        resolve();
+      } catch (e) {
+        cjState.textContent = 'error';
+        setStatus('Failed to initialize Java/CDK: ' + e, 'err');
+        reject(e);
+      }
+    });
+    return cdkReadyPromise;
+  }
+
+  async function generateName(smiles) {
+    await initCheerpJAndCDK();
+
+    // Access needed classes
+    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    const SmilesParser = await cj.org.openscience.cdk.smiles.SmilesParser;
+    const IUPACNameGenerator = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
+    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+
+    const builder = await DefaultChemObjectBuilder.getInstance();
+    const sp = await new SmilesParser(builder);
+
+    try {
+      const mol = await sp.parseSmiles(smiles);
+      // Optional: configure atom types (improves naming robustness)
+      await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
+
+      const name = await IUPACNameGenerator.generate(mol);
+      return name ? String(name) : "<none>";
+    } catch (e) {
+      throw new Error(String(e));
+    }
+  }
+
+  document.getElementById('run').addEventListener('click', async () => {
+    outEl.textContent = '';
+    const smiles = smilesEl.value.trim();
+    if (!smiles) { setStatus('Enter an isomeric SMILES.', 'warn'); return; }
+    setStatus('Generating…');
+    try {
+      const name = await generateName(smiles);
+      log('IUPAC (CDK): ' + name);
+      setStatus('Done.', 'ok');
+    } catch (e) {
+      log('Error: ' + e, 'err');
+      setStatus('Failed. See error above.', 'err');
+    }
+  });
+
+  document.getElementById('copy').addEventListener('click', async () => {
+    const text = outEl.textContent.trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus('Copied to clipboard.', 'ok');
+    } catch {
+      setStatus('Copy failed. Select and copy manually.', 'warn');
+    }
+  });
+
+  document.getElementById('clear').addEventListener('click', () => {
+    smilesEl.value = '';
+    outEl.textContent = '';
+    setStatus('Cleared.');
+  });
+
+  // Kick off runtime load in background
+  initCheerpJAndCDK();
+</script>
+</body>
+</html>
