@@ -66,6 +66,8 @@
       <p class="warn small">Note: In-browser IUPAC generation is experimental; for guaranteed PIN-grade names, use commercial namers.</p>
     </div>
   </div>
+<!-- CheerpJ v4 loader (must come before your script) -->
+<script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
 
 <script>
   const smilesEl = document.getElementById('smiles');
@@ -73,6 +75,7 @@
   const statusEl = document.getElementById('status');
   const cjState = document.getElementById('cjState');
 
+  let cj = null;             // <- handle to CJ3Library
   let cdkReadyPromise = null;
 
   function log(msg, cls) {
@@ -92,11 +95,11 @@
       try {
         cjState.textContent = 'loading…';
         setStatus('Loading CheerpJ runtime…');
-        await cheerpjInit();
+        await cheerpjInit(); // init the runtime
 
         // Load CDK bundle jar from /lib (must exist in the repo)
         setStatus('Loading CDK classes (first load can take a while)…');
-        await cheerpjRunLibrary("/app/lib/cdk-bundle-2.9.jar");
+        cj = await cheerpjRunLibrary("/app/lib/cdk-bundle-2.9.jar");  // <- capture the handle
 
         cjState.textContent = 'ready';
         setStatus('Runtime ready. Paste a SMILES and click Generate.');
@@ -113,21 +116,18 @@
   async function generateName(smiles) {
     await initCheerpJAndCDK();
 
-    // Access needed classes
-    const DefaultChemObjectBuilder = await org.openscience.cdk.DefaultChemObjectBuilder;
-    const SmilesParser = await org.openscience.cdk.smiles.SmilesParser;
-    const IUPACNameGenerator = await org.openscience.cdk.iupac.IUPACNameGenerator;
-    const AtomContainerManipulator = await org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-
+    // Access Java classes THROUGH the CheerpJ library handle
+    const DefaultChemObjectBuilder   = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    const SmilesParser               = await cj.org.openscience.cdk.smiles.SmilesParser;
+    const IUPACNameGenerator         = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
+    const AtomContainerManipulator   = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
 
     const builder = await DefaultChemObjectBuilder.getInstance();
     const sp = await new SmilesParser(builder);
 
     try {
       const mol = await sp.parseSmiles(smiles);
-      // Optional: configure atom types (improves naming robustness)
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
-
       const name = await IUPACNameGenerator.generate(mol);
       return name ? String(name) : "<none>";
     } catch (e) {
