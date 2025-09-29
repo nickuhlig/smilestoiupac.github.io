@@ -114,10 +114,11 @@
     await initCheerpJAndCDK();
 
     // Access needed classes
-    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    const SmilesParser = await cj.org.openscience.cdk.smiles.SmilesParser;
-    const IUPACNameGenerator = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
-    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+    const DefaultChemObjectBuilder = await org.openscience.cdk.DefaultChemObjectBuilder;
+    const SmilesParser = await org.openscience.cdk.smiles.SmilesParser;
+    const IUPACNameGenerator = await org.openscience.cdk.iupac.IUPACNameGenerator;
+    const AtomContainerManipulator = await org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+
 
     const builder = await DefaultChemObjectBuilder.getInstance();
     const sp = await new SmilesParser(builder);
