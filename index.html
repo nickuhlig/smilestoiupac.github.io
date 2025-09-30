@@ -1,191 +1,130 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>SMILES → IUPAC (CDK, in your browser)</title>
+  <meta charset="utf-8" />
+  <title>SMILES → IUPAC (CDK in browser)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Generate algorithmic IUPAC names from SMILES using CDK in the browser via CheerpJ. No server.">
   <style>
-    :root { --bg: #0b1020; --card:#121831; --text:#e9eefc; --muted:#9fb0d6; --accent:#6aa3ff; --ok:#36cfc9; --err:#ff6a6a; }
-    html, body { margin:0; padding:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
-    .wrap { max-width: 900px; margin: 40px auto; padding: 0 16px; }
-    .card { background:var(--card); border-radius:16px; box-shadow: 0 10px 30px rgba(0,0,0,0.35); padding: 20px; }
-    h1 { font-size: clamp(20px, 2.5vw, 28px); margin: 0 0 8px; }
-    p.tag { color: var(--muted); margin: 0 0 16px; }
-    textarea, input[type=text] { width:100%; padding:12px 14px; background:#0c1328; color:var(--text); border:1px solid #1e2a55; border-radius:10px; outline:none; }
-    textarea { min-height:120px; resize:vertical; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .btn { padding:10px 14px; background:#1a2650; color:var(--text); border:1px solid #2a3a78; border-radius:10px; cursor:pointer; }
-    .btn:hover { background:#213062; }
-    .btn.primary { background:linear-gradient(135deg, #427bff, #6aa3ff); border:none; }
-    .btn.ghost { background:transparent; border:1px dashed #30407e; }
-    .status { margin-top: 12px; font-size: 13px; color: var(--muted); }
-    .out { white-space: pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
-    .small { font-size: 12px; color: var(--muted); }
-    .warn { color: #ffd166; }
-    .ok { color: var(--ok); }
-    .err { color: var(--err); }
-    .footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
-    .badge { padding: 3px 8px; border-radius: 999px; background: #0c1328; border:1px solid #2a3a78; margin-left:8px; font-size:11px;}
-    .kbd { padding:2px 6px; border-radius:6px; background:#0c1328; border:1px solid #2a3a78; }
-    .progress { position: relative; height: 10px; background: #1e2a55; border-radius: 999px; overflow: hidden; margin-top: 8px; }
-    .progress.hidden { display:none; }
-    .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#427bff,#6aa3ff); transition: width 200ms ease; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#0b1020; color:#e9eefc; }
+    .wrap { max-width: 800px; margin: 40px auto; padding: 0 16px; }
+    .card { background:#121831; border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+    h1 { margin:0 0 12px; font-size:24px; }
+    textarea { width:100%; min-height:120px; background:#0c1328; color:#e9eefc; border:1px solid #1e2a55; border-radius:10px; padding:12px; }
+    .row { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
+    button { padding:10px 14px; border-radius:10px; border:1px solid #2a3a78; background:#1a2650; color:#e9eefc; cursor:pointer; }
+    button.primary { background:linear-gradient(135deg,#427bff,#6aa3ff); border:none; }
+    .status { margin-top:10px; font-size:13px; color:#9fb0d6; }
+    .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
+    .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
   </style>
-  <!-- CheerpJ v4 loader -->
+  <!-- CheerpJ v4 loader (only this; do NOT include any v3 script) -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>SMILES → IUPAC (algorithmic, offline)</h1>
-      <p class="tag">Runs <strong>CDK</strong> entirely in your browser via <strong>CheerpJ</strong>. No server calls.</p>
-      <p class="small">Tip: works best with <em>isomeric SMILES</em>. Extremely complex fused/bridged systems may yield partial names — that’s a CDK limitation, not the page.</p>
+      <p style="margin:0 0 12px;color:#9fb0d6">Runs CDK entirely in your browser via CheerpJ. No server.</p>
 
-      <label for="smiles" class="small">Isomeric SMILES</label>
-      <textarea id="smiles" placeholder="Paste an isomeric SMILES string here..."></textarea>
+      <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
+      <textarea id="smiles" placeholder="Paste an isomeric SMILES string…">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
 
-      <div class="row" style="margin-top:10px;">
-        <button id="run" class="btn primary">Generate IUPAC</button>
-        <button id="copy" class="btn">Copy output</button>
-        <button id="clear" class="btn ghost">Clear</button>
-        <span id="cjStatus" class="badge">Runtime: <span id="cjState">not loaded</span></span>
+      <div class="row">
+        <button id="run" class="primary">Generate IUPAC</button>
+        <button id="copy">Copy output</button>
+        <button id="clear">Clear</button>
+        <span class="badge">Runtime: <span id="cjState">not loaded</span></span>
       </div>
 
       <div id="status" class="status">Waiting for input…</div>
-
-      <div id="progressWrap" class="progress hidden" aria-hidden="true">
-        <div id="progressBar" class="progress-bar" role="progressbar"
-             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-      </div>
-
       <div id="output" class="out"></div>
-
-      <div class="footer">
-        <span>CDK IUPACNameGenerator • CheerpJ 4</span>
-        <span class="badge">No server</span>
-        <span class="badge">Static page</span>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <h3 style="margin-top:0;">Setup (first time only)</h3>
-      <p class="small">Add <code class="kbd">lib/cdk-bundle-2.9.jar</code> to this repo (from Maven Central). First load fetches the JAR, then it’s cached by your browser.</p>
     </div>
   </div>
 
-<script>
-  const smilesEl = document.getElementById('smiles');
-  const outEl = document.getElementById('output');
-  const statusEl = document.getElementById('status');
-  const cjState = document.getElementById('cjState');
-  const progressWrap = document.getElementById('progressWrap');
-  const progressBar  = document.getElementById('progressBar');
+  <script>
+    // Elements
+    const smilesEl = document.getElementById('smiles');
+    const outEl    = document.getElementById('output');
+    const statusEl = document.getElementById('status');
+    const cjState  = document.getElementById('cjState');
 
-  let cj = null;
-  let initPromise = null;
+    // CheerpJ + CDK handles
+    let cj = null;           // CJ3Library handle (set after loading the JAR)
+    let inited = false;      // we will init ONCE, on first click
 
-  // progress helpers
-  function showProgress(){ progressWrap?.classList.remove('hidden'); }
-  function hideProgress(){ progressWrap?.classList.add('hidden'); setProgress(0); }
-  function setProgress(p, label){
-    if (progressBar){ progressBar.style.width = (p|0) + '%'; progressBar.setAttribute('aria-valuenow', String(p|0)); }
-    if (label) setStatus(label);
-  }
-  function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
-  function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+    function setStatus(msg){ statusEl.textContent = msg; }
+    function log(msg){ const d=document.createElement('div'); d.textContent = msg; outEl.appendChild(d); }
 
-  // Build a URL to lib/cdk-bundle-2.9.jar that works on project pages
-  function jarURL(){
-    // e.g., https://nickuhlig.github.io/smilestoiupac.github.io/lib/cdk-bundle-2.9.jar
-    return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString();
-  }
+    // Build a URL that works on GitHub Pages project sites (repo-based)
+    function jarURL() {
+      // Points to: <site-root>/lib/cdk-bundle-2.9.jar
+      return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString();
+    }
 
-  async function initCheerpJAndCDK() {
-    if (initPromise) return initPromise;
-    initPromise = (async () => {
+    async function ensureInit() {
+      if (inited) return;                // guard: init only once
+      inited = true;
+
       cjState.textContent = 'loading…';
-      showProgress(); setProgress(5, 'Loading CheerpJ runtime…');
-      await cheerpjInit();
+      setStatus('Loading CheerpJ runtime…');
+      await cheerpjInit();               // load the runtime
 
-      setProgress(25, 'Loading CDK…');
+      setStatus('Loading CDK (first time may take a while)…');
       const jar = jarURL();
-      // Load by fully-qualified URL (robust on project pages)
+      // Single call to runLibrary; capture the handle in `cj`
       cj = await cheerpjRunLibrary(jar);
 
-      // Verify classes are exposed
+      // Prove classes are visible (fail early if not)
       await cj.java.lang.Class.forName("org.openscience.cdk.iupac.IUPACNameGenerator");
 
       cjState.textContent = 'ready';
-      setProgress(100, 'Runtime ready. Paste a SMILES and click Generate.');
-      setTimeout(hideProgress, 600);
-    })().catch(err => {
-      cjState.textContent = 'error';
-      setProgress(100, 'Init failed.');
-      setStatus('Failed to initialize: ' + err, 'err');
-      throw err;
-    });
-    return initPromise;
-  }
+      setStatus('Runtime ready. Paste a SMILES and click Generate.');
+    }
 
-  async function generateName(smiles) {
-    await initCheerpJAndCDK();
+    async function nameFromSmiles(smiles) {
+      await ensureInit();
 
-    const DefaultChemObjectBuilder   = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    const SmilesParser               = await cj.org.openscience.cdk.smiles.SmilesParser;
-    const IUPACNameGenerator         = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
-    const AtomContainerManipulator   = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+      // Access classes THROUGH the `cj` handle
+      const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+      const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+      const IUPACNameGenerator       = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
+      const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
 
-    const builder = await DefaultChemObjectBuilder.getInstance();
-    const sp = await new SmilesParser(builder);
+      const builder = await DefaultChemObjectBuilder.getInstance();
+      const sp = await new SmilesParser(builder);
 
-    try {
-      showProgress(); setProgress(10, 'Parsing SMILES…');
       const mol = await sp.parseSmiles(smiles);
-
-      setProgress(50, 'Configuring atoms…');
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
-
-      setProgress(80, 'Generating IUPAC…');
       const name = await IUPACNameGenerator.generate(mol);
 
-      setProgress(100, 'Done.'); setTimeout(hideProgress, 500);
       return name ? String(name) : "<none>";
-    } catch (e) {
-      hideProgress();
-      console.error("Naming error:", e);
-      throw new Error("Naming failed: " + (e && e.message ? e.message : String(e)));
     }
-  }
 
-  // UI
-  document.getElementById('run').addEventListener('click', async () => {
-    outEl.textContent = '';
-    const smiles = (smilesEl.value || '').trim();
-    if (!smiles) { setStatus('Enter an isomeric SMILES.', 'warn'); return; }
-    setStatus('Generating…');
-    try {
-      const name = await generateName(smiles);
-      log('IUPAC (CDK): ' + name);
-      setStatus('Done.', 'ok');
-    } catch (e) {
-      log('Error: ' + e, 'err');
-      setStatus('Failed. See error above.', 'err');
-    }
-  });
+    // UI events (no preload; init happens on first click only)
+    document.getElementById('run').addEventListener('click', async () => {
+      outEl.textContent = '';
+      const smiles = (smilesEl.value || '').trim();
+      if (!smiles) { setStatus('Enter an isomeric SMILES.'); return; }
+      setStatus('Generating…');
+      try {
+        const name = await nameFromSmiles(smiles);
+        log('IUPAC (CDK): ' + name);
+        setStatus('Done.');
+      } catch (e) {
+        console.error(e);
+        log('Error: ' + e);
+        setStatus('Failed. See error above.');
+      }
+    });
 
-  document.getElementById('copy').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(outEl.textContent.trim());
-      setStatus('Copied to clipboard.', 'ok'); }
-    catch { setStatus('Copy failed. Select and copy manually.', 'warn'); }
-  });
+    document.getElementById('copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.'); }
+      catch { setStatus('Copy failed.'); }
+    });
 
-  document.getElementById('clear').addEventListener('click', () => {
-    smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
-  });
-
-  // Preload runtime
-  initCheerpJAndCDK();
-</script>
+    document.getElementById('clear').addEventListener('click', () => {
+      smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
+    });
+  </script>
 </body>
 </html>
