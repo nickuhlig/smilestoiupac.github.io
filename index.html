@@ -44,34 +44,51 @@
   </div>
 
   <script>
-    // ----------- UI helpers -----------
+    // ---------- Safe stringifier to avoid "cannot convert object to primitive value" ----------
+    function S(x) {
+      try {
+        if (x == null) return String(x);
+        if (typeof x === 'string') return x;
+        if (x instanceof Error) return x.message || x.toString();
+        // CheerpJ/Java proxies often have toString()
+        if (typeof x.toString === 'function') {
+          const t = x.toString();
+          if (typeof t === 'string' && t !== '[object Object]') return t;
+        }
+        // Try common fields
+        if (x.message && typeof x.message === 'string') return x.message;
+        // Last resort: JSON (may fail on circular)
+        return JSON.stringify(x);
+      } catch {
+        try { return String(x); } catch { return '<unprintable>'; }
+      }
+    }
+
+    // ---------- UI ----------
     const smilesEl = document.getElementById('smiles');
     const outEl    = document.getElementById('output');
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
 
-    function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
-    function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
+    function setStatus(msg, cls){ statusEl.textContent = S(msg); statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+    function log(msg, cls){ const d=document.createElement('div'); d.textContent = S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // ----------- CheerpJ + CDK state -----------
+    // ---------- CheerpJ + CDK state ----------
     let cj = null;       // CJ3Library handle
-    let inited = false;  // ensure one-time init
+    let inited = false;  // one-time init
 
-    // Build the correct project base path (works on https://user.github.io/repo/)
+    // Build the correct project base path (https://user.github.io/repo/)
     function projectBasePath() {
-      // window.location.pathname starts with "/repo/" on project pages.
-      // Keep only the first path segment ("/repo/"):
       const parts = window.location.pathname.split('/').filter(Boolean);
       const base = parts.length ? ('/' + parts[0] + '/') : '/';
-      return new URL(base, window.location.origin).toString(); // e.g., https://user.github.io/repo/
+      return new URL(base, window.location.origin).toString();
     }
 
-    // Candidate JAR URLs, in order of preference
+    // Candidate JAR URLs
     const MAVEN_JAR = "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-bundle/2.9/cdk-bundle-2.9.jar";
-    function LOCAL_ABS_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', projectBasePath()).toString(); } // https://user.github.io/repo/lib/...
-    function LOCAL_REL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); } // current folder
+    function LOCAL_ABS_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', projectBasePath()).toString(); }
+    function LOCAL_REL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); }
 
-    // Try HEAD to confirm the URL is reachable; show proper error if not
     async function tryHead(url) {
       const r = await fetch(url + (url.includes('?')?'&':'?') + 'cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
@@ -83,15 +100,10 @@
       const candidates = [LOCAL_ABS_JAR(), LOCAL_REL_JAR(), MAVEN_JAR];
       let lastErr;
       for (const url of candidates) {
-        try {
-          const okUrl = await tryHead(url);
-          return okUrl;
-        } catch (e) {
-          lastErr = e;
-          console.warn('JAR not reachable:', url, e.message);
-        }
+        try { return await tryHead(url); }
+        catch (e) { lastErr = e; console.warn('JAR not reachable:', url, S(e)); }
       }
-      throw new Error('Could not fetch CDK jar from any location.\nLast error: ' + (lastErr && lastErr.message));
+      throw new Error('Could not fetch CDK jar from any location. Last error: ' + S(lastErr));
     }
 
     async function ensureInit() {
@@ -102,19 +114,17 @@
       setStatus('Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      // Choose a URL that works for THIS page
       const jarUrl = await resolveJarUrl();
 
-      // Load the JAR (single call) and capture the handle
       setStatus('Loading CDK (first time may take a while)…');
       cj = await cheerpjRunLibrary(jarUrl);
 
-      // Verify classes are exposed (CheerpJ v4 style — just await the class)
+      // Verify classes are exposed (CheerpJ v4 style — await the class)
       try {
         await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
         await cj.org.openscience.cdk.smiles.SmilesParser;
       } catch (e) {
-        throw new Error('CDK classes not exposed from JAR (' + jarUrl + '): ' + e);
+        throw new Error('CDK classes not exposed from JAR (' + jarUrl + '): ' + S(e));
       }
 
       cjState.textContent = 'ready';
@@ -136,10 +146,11 @@
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
       const name = await IUPACNameGenerator.generate(mol);
 
+      // Force conversion of potential Java string proxy
       return name ? String(name) : "<none>";
     }
 
-    // ----------- UI events -----------
+    // ---------- UI events ----------
     document.getElementById('run').addEventListener('click', async () => {
       outEl.textContent = '';
       const smiles = (smilesEl.value || '').trim();
@@ -151,14 +162,14 @@
         setStatus('Done.', 'ok');
       } catch (e) {
         console.error(e);
-        log('Error: ' + e, 'err');
+        log('Error: ' + S(e), 'err');
         setStatus('Failed. See error above.', 'err');
       }
     });
 
     document.getElementById('copy').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.', 'ok'); }
-      catch { setStatus('Copy failed.'); }
+      catch (e) { setStatus('Copy failed: ' + S(e)); }
     });
 
     document.getElementById('clear').addEventListener('click', () => {
