@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>SMILES → IUPAC (CDK + Ambit, single JAR)</title>
+  <title>SMILES → IUPAC (CDK + Ambit, single-JAR)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:#0b1020; color:#e9eefc; }
@@ -29,7 +29,7 @@
   <div class="wrap">
     <div class="card">
       <h1>SMILES → IUPAC (single-JAR, offline)</h1>
-      <p style="margin:0 0 12px;color:#9fb0d6">CDK (SMILES parsing) + Ambit (namer) — all in one JAR, run via CheerpJ in your browser.</p>
+      <p style="margin:0 0 12px;color:#9fb0d6">CDK (SMILES parsing) + Ambit (namer) combined into one JAR, run via CheerpJ in your browser.</p>
 
       <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
       <textarea id="smiles">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
@@ -84,7 +84,6 @@
   // ----- CheerpJ single-bundle load -----
   let cj=null, initPromise=null;
 
-  // Build absolute URL for /lib/iupac-mini-bundle.jar on project pages
   function bundleURL(){
     const parts = window.location.pathname.split('/').filter(Boolean);
     const base  = parts.length ? ('/' + parts[0] + '/') : '/';
@@ -105,18 +104,20 @@
       if (!head.ok) { hideProgress(); disableButtons(false); throw new Error('Missing iupac-mini-bundle.jar (HTTP '+head.status+') at '+url); }
 
       setProgress(40,'Loading single JAR…');
-      cj = await cheerpjRunLibrary(url);   // one call only
+      cj = await cheerpjRunLibrary(url);   // exactly one call
 
+      // Verify key classes are exposed — use Promise.all on the proxies (no double-await)
       setProgress(85,'Finalizing…');
-      try {
-        await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-        await cj.org.openscience.cdk.smiles.SmilesParser;
-        await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-        await cj.ambit2.structure2name.IUPACNameGenerator;
-      } catch(e) {
-        hideProgress(); disableButtons(false);
-        throw new Error('Required classes not exposed from bundle: ' + S(e));
-      }
+      await Promise.all([
+        cj.org.openscience.cdk.DefaultChemObjectBuilder,
+        cj.org.openscience.cdk.smiles.SmilesParser,
+        cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator,
+        // Ambit modules required by structure2name:
+        (cj.ambit2 && (cj.ambit2.base || cj.ambit2.core)),           // base/core presence
+        (cj.ambit2 && (cj.ambit2.smarts || (cj.ambit2.smarts && cj.ambit2.smarts.query))),
+        (cj.ambit2 && (cj.ambit2.tautomers || (cj.ambit2.structure2name && cj.ambit2.structure2name.rules))),
+        cj.ambit2.structure2name.IUPACNameGenerator
+      ]);
 
       cjState.textContent='ready';
       setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
