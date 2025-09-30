@@ -45,14 +45,16 @@ jobs:
               echo "Actual:   $ACT"
               exit 1
             fi
-            # quick zip integrity test
             unzip -tq "$4"
           }
 
+          # Core CDK pieces
           maven_dl org/openscience/cdk cdk-interfaces 2.9 cdk-interfaces-2.9.jar
           maven_dl org/openscience/cdk cdk-core       2.9 cdk-core-2.9.jar
           maven_dl org/openscience/cdk cdk-smiles     2.9 cdk-smiles-2.9.jar
           maven_dl org/openscience/cdk cdk-dict       2.9 cdk-dict-2.9.jar
+          # Missing earlier: tools (contains AtomContainerManipulator)
+          maven_dl org/openscience/cdk cdk-tools      2.9 cdk-tools-2.9.jar
 
       - name: Download Ambit 3.0.0 jars (SourceForge) + zip test
         working-directory: work
@@ -64,18 +66,17 @@ jobs:
             unzip -tq "$2"
           }
           # Ambit deps required by structure2name
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-base-3.0.0.jar"          ambit2-base-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-core-3.0.0.jar"          ambit2-core-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-smarts-3.0.0.jar"        ambit2-smarts-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-tautomers-3.0.0.jar"     ambit2-tautomers-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-rules-3.0.0.jar"         ambit2-rules-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-base-3.0.0.jar"           ambit2-base-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-core-3.0.0.jar"           ambit2-core-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-smarts-3.0.0.jar"         ambit2-smarts-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-tautomers-3.0.0.jar"      ambit2-tautomers-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-rules-3.0.0.jar"          ambit2-rules-3.0.0.jar
           dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar" ambit2-structure2name-3.0.0.jar
 
       - name: Unpack all jars into bundle/
         run: |
           set -euxo pipefail
           shopt -s nullglob
-          # Extract with overwrite (-o) and quiet (-q) to avoid prompts
           for J in work/*.jar; do
             echo "Unzipping $J"
             unzip -oq "$J" -d bundle
@@ -112,7 +113,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add lib/iupac-mini-bundle.jar
-            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + Ambit 3.0.0 modules)"
+            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + tools + Ambit 3.0.0 modules)"
             git push
           else
             echo "No changes to commit."
