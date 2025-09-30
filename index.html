@@ -26,7 +26,7 @@
   <div class="wrap">
     <div class="card">
       <h1>SMILES → IUPAC (algorithmic, offline)</h1>
-      <p style="margin:0 0 12px;color:#9fb0d6">Runs CDK in your browser via CheerpJ. No server.</p>
+      <p style="margin:0 0 12px;color:#9fb0d6">Runs CDK entirely in your browser via CheerpJ. No server.</p>
 
       <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
       <textarea id="smiles" placeholder="Paste an isomeric SMILES string…">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
@@ -44,7 +44,7 @@
   </div>
 
   <script>
-    // --- tiny safe-string helper to avoid "cannot convert object to primitive"
+    // -------- helpers --------
     function S(x){ try{
       if (x==null) return String(x);
       if (typeof x==='string') return x;
@@ -53,29 +53,33 @@
       return JSON.stringify(x);
     }catch{ return '<unprintable>'; } }
 
-    // UI
     const smilesEl = document.getElementById('smiles');
     const outEl    = document.getElementById('output');
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
-    function setStatus(msg,cls){ statusEl.textContent = S(msg); statusEl.className='status'+(cls?' '+cls:''); }
-    function log(msg,cls){ const d=document.createElement('div'); d.textContent=S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // CheerpJ + CDK state
-    let cj = null;
-    let inited = false;
+    function setStatus(msg, cls){ statusEl.textContent = S(msg); statusEl.className = 'status' + (cls?' '+cls:''); }
+    function log(msg, cls){ const d=document.createElement('div'); d.textContent = S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // CDK modules we need (load sequentially!)
-    const CDK = {
-      version: "2.9",
-      base: "https://repo1.maven.org/maven2/org/openscience/cdk",
-      jars: [
-        "cdk-interfaces", // base interfaces
-        "cdk-core",       // core classes
-        "cdk-smiles",     // SmilesParser
-        "cdk-iupac"       // IUPACNameGenerator
-      ]
-    };
+    // -------- CheerpJ + CDK state --------
+    let cj = null;       // CJ3Library handle
+    let inited = false;  // init once
+
+    // Build absolute URL to /lib/ for this project page
+    function libURL(filename){
+      const parts = window.location.pathname.split('/').filter(Boolean);
+      const base = parts.length ? ('/' + parts[0] + '/') : '/';
+      return new URL('lib/' + filename, new URL(base, window.location.origin)).toString();
+    }
+
+    // Local module list (must exist in your repo under /lib/)
+    const JARS = [
+      'cdk-interfaces-2.9.jar',
+      'cdk-core-2.9.jar',
+      'cdk-smiles-2.9.jar',
+      'cdk-iupac-2.9.jar',
+      'cdk-dict-2.9.jar'
+    ];
 
     async function ensureInit(){
       if (inited) return;
@@ -85,21 +89,26 @@
       setStatus('Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      setStatus('Loading CDK modules (first time may take a while)…');
-      // Load required JARs one by one (parallel can trigger "only one library thread" error)
-      for (const name of CDK.jars){
-        const url = `${CDK.base}/${name}/${CDK.version}/${name}-${CDK.version}.jar`;
+      setStatus('Checking local CDK jars…');
+      // Verify existence before trying to load (prevents silent hangs)
+      for (const f of JARS){
+        const url = libURL(f);
+        const r = await fetch(url + '?cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
+        if (!r.ok) throw new Error(`Missing JAR: ${f} (HTTP ${r.status}). Put it in your repo under lib/`);
+      }
+
+      setStatus('Loading CDK modules… (first time may take a while)');
+      // Load sequentially to avoid "only one library thread" error
+      for (const f of JARS){
+        const url = libURL(f);
         try {
-          await fetch(url, { method:'HEAD', cache:'no-store' }).then(r=>{
-            if(!r.ok) throw new Error(`HTTP ${r.status}`);
-          });
           cj = await cheerpjRunLibrary(url);
         } catch(e){
-          throw new Error(`Failed to load ${name} (${url}): ${S(e)}`);
+          throw new Error(`Failed to load ${f}: ${S(e)}`);
         }
       }
 
-      // Verify exposure by touching classes (no Class.forName in v4)
+      // Verify classes are exposed (CheerpJ v4: await the class)
       try {
         await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
         await (await cj).org.openscience.cdk.smiles.SmilesParser;
@@ -109,7 +118,7 @@
       }
 
       cjState.textContent = 'ready';
-      setStatus('Runtime ready. Paste a SMILES and click Generate.', 'ok');
+      setStatus('Runtime ready. Paste a SMILES and click Generate.','ok');
     }
 
     async function nameFromSmiles(smiles){
@@ -130,30 +139,30 @@
       return name ? String(name) : "<none>";
     }
 
-    // UI events
+    // -------- UI events --------
     document.getElementById('run').addEventListener('click', async () => {
       outEl.textContent = '';
       const smiles = (smilesEl.value||'').trim();
-      if(!smiles){ setStatus('Enter an isomeric SMILES.'); return; }
+      if (!smiles) { setStatus('Enter an isomeric SMILES.'); return; }
       setStatus('Generating…');
-      try{
+      try {
         const name = await nameFromSmiles(smiles);
-        log('IUPAC (CDK): '+name);
+        log('IUPAC (CDK): ' + name);
         setStatus('Done.','ok');
-      }catch(e){
+      } catch (e) {
         console.error(e);
-        log('Error: '+S(e),'err');
+        log('Error: ' + S(e), 'err');
         setStatus('Failed. See error above.','err');
       }
     });
 
     document.getElementById('copy').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
-      catch(e){ setStatus('Copy failed: '+S(e)); }
+      catch (e) { setStatus('Copy failed: ' + S(e)); }
     });
 
     document.getElementById('clear').addEventListener('click', () => {
-      smilesEl.value=''; outEl.textContent=''; setStatus('Cleared.');
+      smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
     });
   </script>
 </body>
