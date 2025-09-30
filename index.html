@@ -13,63 +13,88 @@
     .row { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; align-items:center; }
     button { padding:10px 14px; border-radius:10px; border:1px solid #2a3a78; background:#1a2650; color:#e9eefc; cursor:pointer; }
     button.primary { background:linear-gradient(135deg,#427bff,#6aa3ff); border:none; }
+    button[disabled] { opacity:.6; cursor:not-allowed; }
     .status { margin-top:10px; font-size:13px; color:#9fb0d6; }
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
+    .progress { position: relative; height: 10px; background: #1e2a55; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .progress.hidden { display:none; }
+    .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#427bff,#6aa3ff); transition: width 180ms ease; }
     .err { color:#ff6a6a } .ok { color:#36cfc9 } .warn { color:#ffd166 }
   </style>
-  <!-- CheerpJ v4 loader -->
+  <!-- CheerpJ v4 loader (only this; do not include any v3 loader) -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>SMILES → IUPAC (Ambit2 + CDK, offline)</h1>
-      <p style="margin:0 0 12px;color:#9fb0d6">
-        Runs entirely in your browser via CheerpJ. All jars served from this repo’s <code>lib/</code>.
-      </p>
+      <p style="margin:0 0 12px;color:#9fb0d6">Runs entirely in your browser via CheerpJ. All jars are served from this repo’s <code>lib/</code> folder.</p>
 
       <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
       <textarea id="smiles">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
 
       <div class="row">
-        <button id="run" class="primary">Generate IUPAC</button>
+        <button id="run"  class="primary">Generate IUPAC</button>
         <button id="copy">Copy</button>
         <button id="clear">Clear</button>
         <span class="badge">Runtime: <span id="cjState">not loaded</span></span>
       </div>
 
       <div id="status" class="status">Waiting…</div>
+
+      <div id="progressWrap" class="progress hidden" aria-hidden="true">
+        <div id="progressBar" class="progress-bar" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+
       <div id="output" class="out"></div>
     </div>
   </div>
 
 <script>
+  // ---------- safe string ----------
   function S(x){ try{
-    if(x==null) return String(x);
-    if(typeof x==='string') return x;
-    if(x instanceof Error) return x.message||x.toString();
-    const t=x.toString?.(); if(t && t!=='[object Object]') return t;
+    if (x==null) return String(x);
+    if (typeof x==='string') return x;
+    if (x instanceof Error) return x.message||x.toString();
+    const t=x.toString?.(); if (t && t!=='[object Object]') return t;
     return JSON.stringify(x);
   }catch{ return '<unprintable>'; } }
 
+  // ---------- UI ----------
   const smilesEl=document.getElementById('smiles');
-  const outEl=document.getElementById('output');
+  const outEl   =document.getElementById('output');
   const statusEl=document.getElementById('status');
-  const cjState=document.getElementById('cjState');
+  const cjState =document.getElementById('cjState');
+  const btnRun  =document.getElementById('run');
+  const btnCopy =document.getElementById('copy');
+  const btnClear=document.getElementById('clear');
+
+  const progressWrap=document.getElementById('progressWrap');
+  const progressBar =document.getElementById('progressBar');
 
   function setStatus(msg,cls){ statusEl.textContent=S(msg); statusEl.className='status'+(cls?' '+cls:''); }
   function log(msg,cls){ const d=document.createElement('div'); d.textContent=S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
+  function showProgress(){ progressWrap.classList.remove('hidden'); progressWrap.setAttribute('aria-hidden','false'); }
+  function hideProgress(){ progressWrap.classList.add('hidden'); progressWrap.setAttribute('aria-hidden','true'); setProgress(0); }
+  function setProgress(p,label){ const v=Math.max(0,Math.min(100,p|0)); progressBar.style.width=v+'%'; progressBar.setAttribute('aria-valuenow',String(v)); if(label) setStatus(label); }
+  function disableButtons(dis){ btnRun.disabled=dis; btnCopy.disabled=dis; btnClear.disabled=dis; }
 
-  let cj=null, inited=false;
+  // ---------- CheerpJ + libs (single-flight + serialized loads) ----------
+  let cj = null;
+  let initPromise = null;         // single-flight guard
+  let loadLock = Promise.resolve(); // serialization lock for runLibrary
 
-  function libURL(f){
-    const parts=window.location.pathname.split('/').filter(Boolean);
-    const base=parts.length?('/'+parts[0]+'/'):'/';
-    return new URL('lib/'+f, new URL(base, window.location.origin)).toString();
+  // absolute URL to /lib/ on this project page
+  function libURL(filename){
+    const parts = window.location.pathname.split('/').filter(Boolean);
+    const base = parts.length ? ('/' + parts[0] + '/') : '/';
+    return new URL('lib/' + filename, new URL(base, window.location.origin)).toString();
   }
 
-  const JARS=[
+  // local jars (must exist under /lib/)
+  const JARS = [
     'cdk-interfaces-2.9.jar',
     'cdk-core-2.9.jar',
     'cdk-smiles-2.9.jar',
@@ -77,74 +102,117 @@
     'ambit2-structure2name-3.0.0.jar'
   ];
 
+  // serialize cheerpjRunLibrary calls to avoid "only one library thread supported"
+  function runLibrarySerial(url){
+    loadLock = loadLock.then(async () => {
+      // small microtask yield to keep UI responsive
+      await new Promise(r=>setTimeout(r,0));
+      cj = await cheerpjRunLibrary(url);
+      return cj;
+    });
+    return loadLock;
+  }
+
   async function ensureInit(){
-    if(inited) return; inited=true;
-    cjState.textContent='loading…';
-    setStatus('Loading CheerpJ…');
-    await cheerpjInit();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      disableButtons(true);
+      cjState.textContent='loading…';
+      showProgress(); setProgress(5,'Loading CheerpJ runtime…');
+      await cheerpjInit();
 
-    // load jars sequentially
-    for (const f of JARS){
-      const url=libURL(f);
-      const head=await fetch(url+'?cb='+Date.now(),{method:'HEAD',cache:'no-store'});
-      if(!head.ok) throw new Error(`Missing ${f} (HTTP ${head.status})`);
-      cj=await cheerpjRunLibrary(url);
-    }
+      // preflight jars (HEAD) to fail fast if any missing
+      setProgress(20,'Checking local JARs…');
+      for (const f of JARS){
+        const url=libURL(f);
+        const r = await fetch(url+'?cb='+Date.now(), { method:'HEAD', cache:'no-store' });
+        if (!r.ok){ hideProgress(); disableButtons(false); throw new Error(`Missing JAR: ${f} (HTTP ${r.status}). Put it in lib/`); }
+      }
 
-    // verify classes
-    try{
-      await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
-      await (await cj).org.openscience.cdk.smiles.SmilesParser;
-      await (await cj).ambit2.structure2name.IUPACNameGenerator;
-    }catch(e){ throw new Error('Required classes not exposed: '+S(e)); }
+      // load jars strictly one-by-one through the lock
+      setProgress(35,'Loading libraries…');
+      for (let i=0;i<JARS.length;i++){
+        const f = JARS[i];
+        const url = libURL(f);
+        setStatus(`Loading ${f}…`);
+        await runLibrarySerial(url); // <- serialized
+        setProgress(35 + Math.round(((i+1)/JARS.length)*50));
+      }
 
-    cjState.textContent='ready';
-    setStatus('Runtime ready. Paste a SMILES and click Generate.','ok');
+      // verify classes (CheerpJ v4: await the class)
+      setProgress(90,'Finalizing…');
+      try {
+        await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
+        await (await cj).org.openscience.cdk.smiles.SmilesParser;
+        await (await cj).org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+        await (await cj).ambit2.structure2name.IUPACNameGenerator;
+      } catch(e){
+        hideProgress(); disableButtons(false);
+        throw new Error('Required classes not exposed: ' + S(e));
+      }
+
+      cjState.textContent='ready';
+      setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
+      setTimeout(hideProgress, 600);
+      disableButtons(false);
+    })().catch(err => {
+      setStatus('Init failed: ' + S(err), 'err');
+      console.error(err);
+      disableButtons(false);
+      throw err;
+    });
+    return initPromise;
   }
 
   async function nameFromSmiles(smiles){
     await ensureInit();
-    const DefaultChemObjectBuilder=await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    const SmilesParser=await cj.org.openscience.cdk.smiles.SmilesParser;
-    const AtomContainerManipulator=await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-    const IUPAC=await cj.ambit2.structure2name.IUPACNameGenerator;
 
-    const builder=await DefaultChemObjectBuilder.getInstance();
-    const sp=new SmilesParser(builder);
-    const mol=await sp.parseSmiles(smiles);
+    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+    const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
+
+    const builder = await DefaultChemObjectBuilder.getInstance();
+    const sp = new SmilesParser(builder);
+    const mol = await sp.parseSmiles(smiles);
     await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-    // Ambit API has static + instance; try gracefully
-    if(typeof IUPAC.getInstance==='function'){
-      const gen=await IUPAC.getInstance();
+    if (typeof IUPAC.getInstance === 'function') {
+      const gen = await IUPAC.getInstance();
       return String(await gen.generate(mol));
-    }else if(typeof IUPAC.generate==='function'){
+    } else if (typeof IUPAC.generate === 'function') {
       return String(await IUPAC.generate(mol));
-    }else{
-      const gen=new IUPAC();
+    } else {
+      const gen = new IUPAC();
       return String(await gen.generate(mol));
     }
   }
 
-  document.getElementById('run').addEventListener('click', async()=>{
+  // ---------- UI events ----------
+  btnRun.addEventListener('click', async () => {
     outEl.textContent='';
     const smiles=(smilesEl.value||'').trim();
-    if(!smiles){ setStatus('Enter SMILES'); return; }
+    if(!smiles){ setStatus('Enter an isomeric SMILES.'); return; }
+    disableButtons(true);
     setStatus('Generating…');
-    try{
-      const name=await nameFromSmiles(smiles);
-      log('IUPAC: '+name); setStatus('Done.','ok');
-    }catch(e){
-      console.error(e); log('Error: '+S(e),'err'); setStatus('Failed','err');
+    try {
+      const name = await nameFromSmiles(smiles);
+      log('IUPAC: ' + name);
+      setStatus('Done.','ok');
+    } catch (e) {
+      log('Error: ' + S(e), 'err');
+      setStatus('Failed. See error above.','err');
+    } finally {
+      disableButtons(false);
     }
   });
 
-  document.getElementById('copy').addEventListener('click', async()=>{
-    try{ await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
-    catch(e){ setStatus('Copy failed: '+S(e),'warn'); }
+  btnCopy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
+    catch (e) { setStatus('Copy failed: ' + S(e), 'warn'); }
   });
 
-  document.getElementById('clear').addEventListener('click',()=>{
+  btnClear.addEventListener('click', () => {
     smilesEl.value=''; outEl.textContent=''; setStatus('Cleared.');
   });
 </script>
