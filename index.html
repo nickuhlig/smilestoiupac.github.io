@@ -5,7 +5,7 @@
   <title>SMILES → IUPAC (CDK in browser)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background:#0b1020; color:#e9eefc; }
+    body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:#0b1020; color:#e9eefc; }
     .wrap { max-width: 800px; margin: 40px auto; padding: 0 16px; }
     .card { background:#121831; border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
     h1 { margin:0 0 12px; font-size:24px; }
@@ -17,7 +17,7 @@
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
     .err { color:#ff6a6a }
-    .ok { color:#36cfc9 }
+    .ok  { color:#36cfc9 }
   </style>
   <!-- CheerpJ v4 loader -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
@@ -26,7 +26,7 @@
   <div class="wrap">
     <div class="card">
       <h1>SMILES → IUPAC (algorithmic, offline)</h1>
-      <p style="margin:0 0 12px;color:#9fb0d6">Runs CDK entirely in your browser via CheerpJ. No server.</p>
+      <p style="margin:0 0 12px;color:#9fb0d6">Runs CDK in your browser via CheerpJ. No server.</p>
 
       <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
       <textarea id="smiles" placeholder="Paste an isomeric SMILES string…">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
@@ -44,69 +44,40 @@
   </div>
 
   <script>
-    // ---------- Safe stringifier to avoid "cannot convert object to primitive value" ----------
-    function S(x) {
-      try {
-        if (x == null) return String(x);
-        if (typeof x === 'string') return x;
-        if (x instanceof Error) return x.message || x.toString();
-        // CheerpJ/Java proxies often have toString()
-        if (typeof x.toString === 'function') {
-          const t = x.toString();
-          if (typeof t === 'string' && t !== '[object Object]') return t;
-        }
-        // Try common fields
-        if (x.message && typeof x.message === 'string') return x.message;
-        // Last resort: JSON (may fail on circular)
-        return JSON.stringify(x);
-      } catch {
-        try { return String(x); } catch { return '<unprintable>'; }
-      }
-    }
+    // --- tiny safe-string helper to avoid "cannot convert object to primitive"
+    function S(x){ try{
+      if (x==null) return String(x);
+      if (typeof x==='string') return x;
+      if (x instanceof Error) return x.message||x.toString();
+      const t = x.toString?.(); if (t && t!=='[object Object]') return String(t);
+      return JSON.stringify(x);
+    }catch{ return '<unprintable>'; } }
 
-    // ---------- UI ----------
+    // UI
     const smilesEl = document.getElementById('smiles');
     const outEl    = document.getElementById('output');
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
+    function setStatus(msg,cls){ statusEl.textContent = S(msg); statusEl.className='status'+(cls?' '+cls:''); }
+    function log(msg,cls){ const d=document.createElement('div'); d.textContent=S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
 
-    function setStatus(msg, cls){ statusEl.textContent = S(msg); statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
-    function log(msg, cls){ const d=document.createElement('div'); d.textContent = S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
+    // CheerpJ + CDK state
+    let cj = null;
+    let inited = false;
 
-    // ---------- CheerpJ + CDK state ----------
-    let cj = null;       // CJ3Library handle
-    let inited = false;  // one-time init
+    // CDK modules we need (load sequentially!)
+    const CDK = {
+      version: "2.9",
+      base: "https://repo1.maven.org/maven2/org/openscience/cdk",
+      jars: [
+        "cdk-interfaces", // base interfaces
+        "cdk-core",       // core classes
+        "cdk-smiles",     // SmilesParser
+        "cdk-iupac"       // IUPACNameGenerator
+      ]
+    };
 
-    // Build the correct project base path (https://user.github.io/repo/)
-    function projectBasePath() {
-      const parts = window.location.pathname.split('/').filter(Boolean);
-      const base = parts.length ? ('/' + parts[0] + '/') : '/';
-      return new URL(base, window.location.origin).toString();
-    }
-
-    // Candidate JAR URLs
-    const MAVEN_JAR = "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-bundle/2.9/cdk-bundle-2.9.jar";
-    function LOCAL_ABS_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', projectBasePath()).toString(); }
-    function LOCAL_REL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); }
-
-    async function tryHead(url) {
-      const r = await fetch(url + (url.includes('?')?'&':'?') + 'cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-      return url;
-    }
-
-    async function resolveJarUrl() {
-      setStatus('Resolving CDK jar…');
-      const candidates = [LOCAL_ABS_JAR(), LOCAL_REL_JAR(), MAVEN_JAR];
-      let lastErr;
-      for (const url of candidates) {
-        try { return await tryHead(url); }
-        catch (e) { lastErr = e; console.warn('JAR not reachable:', url, S(e)); }
-      }
-      throw new Error('Could not fetch CDK jar from any location. Last error: ' + S(lastErr));
-    }
-
-    async function ensureInit() {
+    async function ensureInit(){
       if (inited) return;
       inited = true;
 
@@ -114,24 +85,34 @@
       setStatus('Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      const jarUrl = await resolveJarUrl();
+      setStatus('Loading CDK modules (first time may take a while)…');
+      // Load required JARs one by one (parallel can trigger "only one library thread" error)
+      for (const name of CDK.jars){
+        const url = `${CDK.base}/${name}/${CDK.version}/${name}-${CDK.version}.jar`;
+        try {
+          await fetch(url, { method:'HEAD', cache:'no-store' }).then(r=>{
+            if(!r.ok) throw new Error(`HTTP ${r.status}`);
+          });
+          cj = await cheerpjRunLibrary(url);
+        } catch(e){
+          throw new Error(`Failed to load ${name} (${url}): ${S(e)}`);
+        }
+      }
 
-      setStatus('Loading CDK (first time may take a while)…');
-      cj = await cheerpjRunLibrary(jarUrl);
-
-      // Verify classes are exposed (CheerpJ v4 style — await the class)
+      // Verify exposure by touching classes (no Class.forName in v4)
       try {
-        await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
-        await cj.org.openscience.cdk.smiles.SmilesParser;
-      } catch (e) {
-        throw new Error('CDK classes not exposed from JAR (' + jarUrl + '): ' + S(e));
+        await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
+        await (await cj).org.openscience.cdk.smiles.SmilesParser;
+        await (await cj).org.openscience.cdk.iupac.IUPACNameGenerator;
+      } catch(e){
+        throw new Error('CDK classes not exposed after module load: '+S(e));
       }
 
       cjState.textContent = 'ready';
       setStatus('Runtime ready. Paste a SMILES and click Generate.', 'ok');
     }
 
-    async function nameFromSmiles(smiles) {
+    async function nameFromSmiles(smiles){
       await ensureInit();
 
       const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
@@ -146,34 +127,33 @@
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
       const name = await IUPACNameGenerator.generate(mol);
 
-      // Force conversion of potential Java string proxy
       return name ? String(name) : "<none>";
     }
 
-    // ---------- UI events ----------
+    // UI events
     document.getElementById('run').addEventListener('click', async () => {
       outEl.textContent = '';
-      const smiles = (smilesEl.value || '').trim();
-      if (!smiles) { setStatus('Enter an isomeric SMILES.'); return; }
+      const smiles = (smilesEl.value||'').trim();
+      if(!smiles){ setStatus('Enter an isomeric SMILES.'); return; }
       setStatus('Generating…');
-      try {
+      try{
         const name = await nameFromSmiles(smiles);
-        log('IUPAC (CDK): ' + name);
-        setStatus('Done.', 'ok');
-      } catch (e) {
+        log('IUPAC (CDK): '+name);
+        setStatus('Done.','ok');
+      }catch(e){
         console.error(e);
-        log('Error: ' + S(e), 'err');
-        setStatus('Failed. See error above.', 'err');
+        log('Error: '+S(e),'err');
+        setStatus('Failed. See error above.','err');
       }
     });
 
     document.getElementById('copy').addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.', 'ok'); }
-      catch (e) { setStatus('Copy failed: ' + S(e)); }
+      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
+      catch(e){ setStatus('Copy failed: '+S(e)); }
     });
 
     document.getElementById('clear').addEventListener('click', () => {
-      smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
+      smilesEl.value=''; outEl.textContent=''; setStatus('Cleared.');
     });
   </script>
 </body>
