@@ -17,6 +17,7 @@
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
     .err { color:#ff6a6a }
+    .ok { color:#36cfc9 }
   </style>
   <!-- CheerpJ v4 loader -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
@@ -43,39 +44,54 @@
   </div>
 
   <script>
-    // Elements
+    // ----------- UI helpers -----------
     const smilesEl = document.getElementById('smiles');
     const outEl    = document.getElementById('output');
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
 
-    // CheerpJ + CDK handles
-    let cj = null;
-    let inited = false;
-
     function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
     function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // Prefer Maven Central (CORS-enabled), then fall back to repo path
-    const MAVEN_JAR = "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-bundle/2.9/cdk-bundle-2.9.jar";
-    function LOCAL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); }
+    // ----------- CheerpJ + CDK state -----------
+    let cj = null;       // CJ3Library handle
+    let inited = false;  // ensure one-time init
 
-    async function fetchOk(url){
-      const u = url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now();
-      const r = await fetch(u, { method:'HEAD', cache:'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
-      return url; // return the clean URL
+    // Build the correct project base path (works on https://user.github.io/repo/)
+    function projectBasePath() {
+      // window.location.pathname starts with "/repo/" on project pages.
+      // Keep only the first path segment ("/repo/"):
+      const parts = window.location.pathname.split('/').filter(Boolean);
+      const base = parts.length ? ('/' + parts[0] + '/') : '/';
+      return new URL(base, window.location.origin).toString(); // e.g., https://user.github.io/repo/
     }
 
-    async function resolveJarUrl(){
-      try { return await fetchOk(MAVEN_JAR); }
-      catch(e1){ console.warn('Maven Central fetch failed:', e1.message); }
-      try { return await fetchOk(LOCAL_JAR()); }
-      catch(e2){
-        throw new Error('Could not fetch CDK jar from Maven Central or local repo.\n' +
-                        'Last errors:\n- ' + e2.message + '\n' +
-                        'Tip: If you added the JAR with Git LFS, GitHub Pages will not serve it. Remove LFS and store it as a normal file, or rely on Maven Central.');
+    // Candidate JAR URLs, in order of preference
+    const MAVEN_JAR = "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-bundle/2.9/cdk-bundle-2.9.jar";
+    function LOCAL_ABS_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', projectBasePath()).toString(); } // https://user.github.io/repo/lib/...
+    function LOCAL_REL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); } // current folder
+
+    // Try HEAD to confirm the URL is reachable; show proper error if not
+    async function tryHead(url) {
+      const r = await fetch(url + (url.includes('?')?'&':'?') + 'cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      return url;
+    }
+
+    async function resolveJarUrl() {
+      setStatus('Resolving CDK jar…');
+      const candidates = [LOCAL_ABS_JAR(), LOCAL_REL_JAR(), MAVEN_JAR];
+      let lastErr;
+      for (const url of candidates) {
+        try {
+          const okUrl = await tryHead(url);
+          return okUrl;
+        } catch (e) {
+          lastErr = e;
+          console.warn('JAR not reachable:', url, e.message);
+        }
       }
+      throw new Error('Could not fetch CDK jar from any location.\nLast error: ' + (lastErr && lastErr.message));
     }
 
     async function ensureInit() {
@@ -86,18 +102,23 @@
       setStatus('Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      setStatus('Resolving CDK jar…');
+      // Choose a URL that works for THIS page
       const jarUrl = await resolveJarUrl();
 
+      // Load the JAR (single call) and capture the handle
       setStatus('Loading CDK (first time may take a while)…');
       cj = await cheerpjRunLibrary(jarUrl);
 
-      // Verify by touching classes (CheerpJ v4 pattern)
-      await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
-      await cj.org.openscience.cdk.smiles.SmilesParser;
+      // Verify classes are exposed (CheerpJ v4 style — just await the class)
+      try {
+        await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
+        await cj.org.openscience.cdk.smiles.SmilesParser;
+      } catch (e) {
+        throw new Error('CDK classes not exposed from JAR (' + jarUrl + '): ' + e);
+      }
 
       cjState.textContent = 'ready';
-      setStatus('Runtime ready. Paste a SMILES and click Generate.');
+      setStatus('Runtime ready. Paste a SMILES and click Generate.', 'ok');
     }
 
     async function nameFromSmiles(smiles) {
@@ -118,7 +139,7 @@
       return name ? String(name) : "<none>";
     }
 
-    // UI events
+    // ----------- UI events -----------
     document.getElementById('run').addEventListener('click', async () => {
       outEl.textContent = '';
       const smiles = (smilesEl.value || '').trim();
@@ -127,7 +148,7 @@
       try {
         const name = await nameFromSmiles(smiles);
         log('IUPAC (CDK): ' + name);
-        setStatus('Done.');
+        setStatus('Done.', 'ok');
       } catch (e) {
         console.error(e);
         log('Error: ' + e, 'err');
@@ -136,7 +157,7 @@
     });
 
     document.getElementById('copy').addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.'); }
+      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.', 'ok'); }
       catch { setStatus('Copy failed.'); }
     });
 
