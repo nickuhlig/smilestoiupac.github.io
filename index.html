@@ -62,6 +62,13 @@
     return JSON.stringify(x);
   }catch{ return '<unprintable>'; } }
 
+  // ----- helper to catch missed awaits -----
+  function assertNotThenable(x, label){
+    if (x && typeof x.then === 'function') {
+      throw new Error(`Missing await on ${label}`);
+    }
+  }
+
   // ----- UI -----
   const smilesEl=document.getElementById('smiles');
   const outEl   =document.getElementById('output');
@@ -91,70 +98,90 @@
   }
 
   async function ensureInit(){
-  if (initPromise) return initPromise;
-  initPromise = (async () => {
-    disableButtons(true);
-    cjState.textContent='loading…';
-    showProgress(); setProgress(5,'Loading CheerpJ runtime…');
-    await cheerpjInit();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      disableButtons(true);
+      cjState.textContent='loading…';
+      showProgress(); setProgress(5,'Loading CheerpJ runtime…');
+      await cheerpjInit();
 
-    const url = bundleURL();
-    setProgress(20,'Checking bundle…');
-    const head = await fetch(url + '?cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
-    if (!head.ok) { hideProgress(); disableButtons(false); throw new Error('Missing iupac-mini-bundle.jar (HTTP '+head.status+') at '+url); }
+      const url = bundleURL();
+      setProgress(20,'Checking bundle…');
+      const head = await fetch(url + '?cb=' + Date.now(), { method:'HEAD', cache:'no-store' });
+      if (!head.ok) { hideProgress(); disableButtons(false); throw new Error('Missing iupac-mini-bundle.jar (HTTP '+head.status+') at '+url); }
 
-    setProgress(40,'Loading single JAR…');
-    cj = await cheerpjRunLibrary(url);   // exactly one call
+      setProgress(40,'Loading single JAR…');
+      cj = await cheerpjRunLibrary(url);
 
-    // Verify only the classes we actually use
-    setProgress(85,'Finalizing…');
-    await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    await cj.org.openscience.cdk.smiles.SmilesParser;
-    await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-    await cj.ambit2.structure2name.IUPACNameGenerator;
+      // Verify key classes are exposed
+      setProgress(85,'Finalizing…');
+      await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+      await cj.org.openscience.cdk.smiles.SmilesParser;
+      await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+      await cj.ambit2.structure2name.IUPACNameGenerator;
 
-    cjState.textContent='ready';
-    setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
-    setTimeout(hideProgress, 600);
-    disableButtons(false);
-  })().catch(err => {
-    setStatus('Init failed: ' + S(err), 'err');
-    console.error(err);
-    disableButtons(false);
-    throw err;
-  });
-  return initPromise;
-}
-
- async function nameFromSmiles(smiles){
-  await ensureInit();
-
-  // Pull class proxies (each is a Promise in CheerpJ v4)
-  const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-  const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
-  const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-  const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
-
-  // Await Java calls/constructors
-  const builder = await DefaultChemObjectBuilder.getInstance(); // static -> Promise
-  const sp      = await new SmilesParser(builder);              // **await constructor**
-  const mol     = await sp.parseSmiles(smiles);                 // method -> Promise
-  await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
-
-  // Ambit API variants
-  if (typeof IUPAC.getInstance === 'function') {
-    const gen = await IUPAC.getInstance();
-    const name = await gen.generate(mol);
-    return name ? String(name) : "<none>";
-  } else if (typeof IUPAC.generate === 'function') {
-    const name = await IUPAC.generate(mol);
-    return name ? String(name) : "<none>";
-  } else {
-    const gen = await new IUPAC();                              // **await constructor**
-    const name = await gen.generate(mol);
-    return name ? String(name) : "<none>";
+      cjState.textContent='ready';
+      setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
+      setTimeout(hideProgress, 600);
+      disableButtons(false);
+    })().catch(err => {
+      setStatus('Init failed: ' + S(err), 'err');
+      console.error(err);
+      disableButtons(false);
+      throw err;
+    });
+    return initPromise;
   }
-}
+
+  async function nameFromSmiles(smiles){
+    await ensureInit();
+
+    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    assertNotThenable(DefaultChemObjectBuilder, 'DefaultChemObjectBuilder class');
+
+    const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+    assertNotThenable(SmilesParser, 'SmilesParser class');
+
+    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+    assertNotThenable(AtomContainerManipulator, 'AtomContainerManipulator class');
+
+    const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
+    assertNotThenable(IUPAC, 'IUPACNameGenerator class');
+
+    const builder = await DefaultChemObjectBuilder.getInstance();
+    assertNotThenable(builder, 'DefaultChemObjectBuilder.getInstance()');
+
+    const sp = await new SmilesParser(builder); // constructor is async
+    assertNotThenable(sp, 'new SmilesParser(builder)');
+
+    const mol = await sp.parseSmiles(smiles);
+    assertNotThenable(mol, 'sp.parseSmiles(smiles) result');
+
+    await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
+
+    if (typeof IUPAC.getInstance === 'function') {
+      const gen = await IUPAC.getInstance();
+      assertNotThenable(gen, 'IUPAC.getInstance()');
+
+      const name = await gen.generate(mol);
+      assertNotThenable(name, 'gen.generate(mol)');
+
+      return name ? String(name) : "<none>";
+    } else if (typeof IUPAC.generate === 'function') {
+      const name = await IUPAC.generate(mol);
+      assertNotThenable(name, 'IUPAC.generate(mol)');
+
+      return name ? String(name) : "<none>";
+    } else {
+      const gen = await new IUPAC(); // constructor is async
+      assertNotThenable(gen, 'new IUPAC()');
+
+      const name = await gen.generate(mol);
+      assertNotThenable(name, 'gen.generate(mol)');
+
+      return name ? String(name) : "<none>";
+    }
+  }
 
   // ----- UI events -----
   btnRun.addEventListener('click', async () => {
