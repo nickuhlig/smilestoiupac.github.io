@@ -69,6 +69,17 @@
     }
   }
 
+  // ----- resolve a class path and tell you exactly which one fails -----
+  async function resolveClass(cj, dotted){
+    const parts = dotted.split('.');
+    let cur = cj;
+    for (const p of parts){
+      cur = await cur[p];
+      if (!cur) throw new Error(`Class resolution failed at "${dotted}" (stuck at segment "${p}")`);
+    }
+    return cur;
+  }
+
   // ----- UI -----
   const smilesEl=document.getElementById('smiles');
   const outEl   =document.getElementById('output');
@@ -113,12 +124,19 @@
       setProgress(40,'Loading single JAR…');
       cj = await cheerpjRunLibrary(url);
 
-      // Verify key classes are exposed (these were missing before when tools.jar was absent)
-      setProgress(85,'Finalizing…');
-      await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-      await cj.org.openscience.cdk.smiles.SmilesParser;
-      await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-      await cj.ambit2.structure2name.IUPACNameGenerator;
+      // Verify key classes are exposed. If any fails, the thrown error names it.
+      setProgress(85,'Finalizing (verifying classes)…');
+      const REQUIRED = [
+        'org.openscience.cdk.DefaultChemObjectBuilder',
+        'org.openscience.cdk.smiles.SmilesParser',
+        'org.openscience.cdk.tools.manipulator.AtomContainerManipulator',
+        'org.openscience.cdk.atomtype.CDKAtomTypeMatcher',
+        'org.openscience.cdk.tools.ValencyChecker',
+        'ambit2.structure2name.IUPACNameGenerator'
+      ];
+      for (const fqcn of REQUIRED){
+        await resolveClass(cj, fqcn);
+      }
 
       cjState.textContent='ready';
       setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
@@ -136,16 +154,16 @@
   async function nameFromSmiles(smiles){
     await ensureInit();
 
-    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    const DefaultChemObjectBuilder = await resolveClass(cj, 'org.openscience.cdk.DefaultChemObjectBuilder');
     assertNotThenable(DefaultChemObjectBuilder, 'DefaultChemObjectBuilder class');
 
-    const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+    const SmilesParser             = await resolveClass(cj, 'org.openscience.cdk.smiles.SmilesParser');
     assertNotThenable(SmilesParser, 'SmilesParser class');
 
-    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+    const AtomContainerManipulator = await resolveClass(cj, 'org.openscience.cdk.tools.manipulator.AtomContainerManipulator');
     assertNotThenable(AtomContainerManipulator, 'AtomContainerManipulator class');
 
-    const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
+    const IUPAC                    = await resolveClass(cj, 'ambit2.structure2name.IUPACNameGenerator');
     assertNotThenable(IUPAC, 'IUPACNameGenerator class');
 
     const builder = await DefaultChemObjectBuilder.getInstance();
@@ -159,7 +177,6 @@
 
     await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-    // Ambit API variants — try in order
     if (typeof IUPAC.getInstance === 'function') {
       const gen = await IUPAC.getInstance();
       assertNotThenable(gen, 'IUPAC.getInstance()');
