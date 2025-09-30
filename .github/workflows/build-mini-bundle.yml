@@ -2,9 +2,6 @@ name: Build IUPAC mini-bundle
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/build-mini-bundle.yml
 
 permissions:
   contents: write
@@ -16,42 +13,83 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Ensure tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip zip curl
+
       - name: Prepare folders
         run: |
-          rm -rf bundle work lib
+          set -euxo pipefail
+          rm -rf bundle work
           mkdir -p bundle work lib
 
-      - name: Download CDK & Ambit jars
+      - name: Download jars (CDK 2.9 + Ambit 3.0.0) with retries
+        working-directory: work
         run: |
-          cd work
-          curl -L -o cdk-interfaces-2.9.jar https://repo1.maven.org/maven2/org/openscience/cdk/cdk-interfaces/2.9/cdk-interfaces-2.9.jar
-          curl -L -o cdk-core-2.9.jar       https://repo1.maven.org/maven2/org/openscience/cdk/cdk-core/2.9/cdk-core-2.9.jar
-          curl -L -o cdk-smiles-2.9.jar     https://repo1.maven.org/maven2/org/openscience/cdk/cdk-smiles/2.9/cdk-smiles-2.9.jar
-          curl -L -o cdk-dict-2.9.jar       https://repo1.maven.org/maven2/org/openscience/cdk/cdk-dict/2.9/cdk-dict-2.9.jar
-          # Ambit 3.0.0 (download from SourceForge mirror)
-          curl -L -o ambit2-structure2name-3.0.0.jar \
-            https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar
+          set -euxo pipefail
+
+          dl() { # url outname
+            for i in 1 2 3; do
+              echo "Downloading $1 (attempt $i)..."
+              curl -L --fail --retry 3 --retry-all-errors -o "$2" "$1" && break || sleep 2
+            done
+            test -s "$2"
+            SIZE=$(stat -c%s "$2" || stat -f%z "$2" || echo 0)
+            # sanity check: >100 KB
+            if [ "$SIZE" -lt 102400 ]; then
+              echo "Downloaded file too small ($SIZE bytes): $2"
+              exit 1
+            fi
+          }
+
+          # CDK modules
+          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-interfaces/2.9/cdk-interfaces-2.9.jar" cdk-interfaces-2.9.jar
+          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-core/2.9/cdk-core-2.9.jar"             cdk-core-2.9.jar
+          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-smiles/2.9/cdk-smiles-2.9.jar"         cdk-smiles-2.9.jar
+          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-dict/2.9/cdk-dict-2.9.jar"             cdk-dict-2.9.jar
+
+          # Ambit 3.0.0 — use SourceForge "downloads" which redirects to a mirror
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar" ambit2-structure2name-3.0.0.jar
 
       - name: Unpack all jars into bundle/
         run: |
-          cd work
-          for J in *.jar; do
+          set -euxo pipefail
+          shopt -s nullglob
+          for J in work/*.jar; do
             echo "Unzipping $J"
-            unzip -q "$J" -d ../bundle
+            unzip -q "$J" -d bundle
           done
+          # Remove signature files to avoid manifest/signature conflicts
+          find bundle -type f \( -name "*.SF" -o -name "*.DSA" -o -name "*.RSA" \) -delete
 
       - name: Build combined JAR
         run: |
+          set -euxo pipefail
           cd bundle
-          # Remove signature files if present (avoid security metadata conflicts)
-          find . -type f \( -name "*.SF" -o -name "*.DSA" -o -name "*.RSA" \) -delete
           zip -qr ../lib/iupac-mini-bundle.jar .
+          cd ..
+          ls -lh lib/iupac-mini-bundle.jar
+          # Hard fail if > 25 MiB (GitHub Pages limit)
+          BYTES=$(stat -c%s lib/iupac-mini-bundle.jar || stat -f%z lib/iupac-mini-bundle.jar || echo 0)
+          echo "Bundle size: $BYTES bytes"
+          if [ "$BYTES" -gt $((25*1024*1024)) ]; then
+            echo "ERROR: iupac-mini-bundle.jar exceeds 25 MiB. Trim required."
+            exit 1
+          fi
 
-      - name: Show bundle size
-        run: du -h lib/iupac-mini-bundle.jar
+      - name: Upload bundle as artifact (for debugging/manual download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: iupac-mini-bundle.jar
+          path: lib/iupac-mini-bundle.jar
+          if-no-files-found: error
 
       - name: Commit mini-bundle into repo
         run: |
+          set -euxo pipefail
+          # Only commit if changed/new
           if [ -n "$(git status --porcelain lib/iupac-mini-bundle.jar)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
