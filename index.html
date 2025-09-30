@@ -69,6 +69,9 @@
     }
   }
 
+  // ----- tiny checkpoint logger -----
+  function checkpoint(label){ console.log('[CHK]', label); }
+
   // ----- UI -----
   const smilesEl=document.getElementById('smiles');
   const outEl   =document.getElementById('output');
@@ -115,6 +118,7 @@
 
       // Verify key classes are exposed
       setProgress(85,'Finalizing…');
+      checkpoint('await CDK + Ambit class proxies');
       await cj.org.openscience.cdk.DefaultChemObjectBuilder;
       await cj.org.openscience.cdk.smiles.SmilesParser;
       await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
@@ -135,51 +139,73 @@
 
   async function nameFromSmiles(smiles){
     await ensureInit();
+    try {
+      checkpoint('get class proxies');
+      const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+      assertNotThenable(DefaultChemObjectBuilder, 'DefaultChemObjectBuilder class');
 
-    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    assertNotThenable(DefaultChemObjectBuilder, 'DefaultChemObjectBuilder class');
+      const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+      assertNotThenable(SmilesParser, 'SmilesParser class');
 
-    const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
-    assertNotThenable(SmilesParser, 'SmilesParser class');
+      const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+      assertNotThenable(AtomContainerManipulator, 'AtomContainerManipulator class');
 
-    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-    assertNotThenable(AtomContainerManipulator, 'AtomContainerManipulator class');
+      const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
+      assertNotThenable(IUPAC, 'IUPACNameGenerator class');
 
-    const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
-    assertNotThenable(IUPAC, 'IUPACNameGenerator class');
+      checkpoint('builder.getInstance');
+      const builder = await DefaultChemObjectBuilder.getInstance();
+      assertNotThenable(builder, 'DefaultChemObjectBuilder.getInstance()');
 
-    const builder = await DefaultChemObjectBuilder.getInstance();
-    assertNotThenable(builder, 'DefaultChemObjectBuilder.getInstance()');
+      checkpoint('new SmilesParser');
+      const sp = await new SmilesParser(builder); // constructor is async
+      assertNotThenable(sp, 'new SmilesParser(builder)');
 
-    const sp = await new SmilesParser(builder); // constructor is async
-    assertNotThenable(sp, 'new SmilesParser(builder)');
+      checkpoint('parseSmiles');
+      const mol = await sp.parseSmiles(smiles);
+      assertNotThenable(mol, 'sp.parseSmiles(smiles) result');
 
-    const mol = await sp.parseSmiles(smiles);
-    assertNotThenable(mol, 'sp.parseSmiles(smiles) result');
+      checkpoint('configure atoms');
+      await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-    await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
+      // Ambit API variants — try in order
+      checkpoint('IUPAC naming');
+      if (typeof IUPAC.getInstance === 'function') {
+        const gen = await IUPAC.getInstance();
+        assertNotThenable(gen, 'IUPAC.getInstance()');
 
-    if (typeof IUPAC.getInstance === 'function') {
-      const gen = await IUPAC.getInstance();
-      assertNotThenable(gen, 'IUPAC.getInstance()');
+        const name = await gen.generate(mol);
+        assertNotThenable(name, 'gen.generate(mol)');
+        return name ? String(name) : "<none>";
+      }
 
-      const name = await gen.generate(mol);
-      assertNotThenable(name, 'gen.generate(mol)');
+      if (typeof IUPAC.generate === 'function') {
+        const name = await IUPAC.generate(mol);
+        assertNotThenable(name, 'IUPAC.generate(mol)');
+        return name ? String(name) : "<none>";
+      }
 
-      return name ? String(name) : "<none>";
-    } else if (typeof IUPAC.generate === 'function') {
-      const name = await IUPAC.generate(mol);
-      assertNotThenable(name, 'IUPAC.generate(mol)');
+      // Other Ambit variants seen in the wild:
+      const maybeGet = IUPAC.getIUPACName || IUPAC.getPreferredIUPACName;
+      if (typeof maybeGet === 'function') {
+        const name = await maybeGet.call(IUPAC, mol);
+        assertNotThenable(name, 'IUPAC.get*IUPACName(mol)');
+        return name ? String(name) : "<none>";
+      }
 
-      return name ? String(name) : "<none>";
-    } else {
-      const gen = await new IUPAC(); // constructor is async
+      const gen = await new IUPAC(); // last-resort instance constructor
       assertNotThenable(gen, 'new IUPAC()');
+      const name = await gen.generate ? gen.generate(mol)
+                 : gen.getIUPACName ? gen.getIUPACName(mol)
+                 : gen.getPreferredIUPACName ? gen.getPreferredIUPACName(mol)
+                 : null;
+      assertNotThenable(name, 'IUPAC instance naming');
+      if (name == null) throw new Error('IUPACNameGenerator has no supported method (generate/getIUPACName/getPreferredIUPACName).');
+      return String(name);
 
-      const name = await gen.generate(mol);
-      assertNotThenable(name, 'gen.generate(mol)');
-
-      return name ? String(name) : "<none>";
+    } catch (e){
+      console.error('nameFromSmiles failed:', e);
+      throw e;
     }
   }
 
