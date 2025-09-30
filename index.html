@@ -32,7 +32,7 @@
     .progress.hidden { display:none; }
     .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#427bff,#6aa3ff); transition: width 200ms ease; }
   </style>
-  <!-- CheerpJ v4 loader (must come before your script) -->
+  <!-- CheerpJ v4 loader -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
 </head>
 <body>
@@ -41,20 +41,26 @@
       <h1>SMILES → IUPAC (algorithmic, offline)</h1>
       <p class="tag">Runs <strong>CDK</strong> entirely in your browser via <strong>CheerpJ</strong>. No server calls.</p>
       <p class="small">Tip: works best with <em>isomeric SMILES</em>. Extremely complex fused/bridged systems may yield partial names — that’s a CDK limitation, not the page.</p>
+
       <label for="smiles" class="small">Isomeric SMILES</label>
       <textarea id="smiles" placeholder="Paste an isomeric SMILES string here..."></textarea>
+
       <div class="row" style="margin-top:10px;">
         <button id="run" class="btn primary">Generate IUPAC</button>
         <button id="copy" class="btn">Copy output</button>
         <button id="clear" class="btn ghost">Clear</button>
         <span id="cjStatus" class="badge">Runtime: <span id="cjState">not loaded</span></span>
       </div>
+
       <div id="status" class="status">Waiting for input…</div>
+
       <div id="progressWrap" class="progress hidden" aria-hidden="true">
         <div id="progressBar" class="progress-bar" role="progressbar"
              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
       </div>
+
       <div id="output" class="out"></div>
+
       <div class="footer">
         <span>CDK IUPACNameGenerator • CheerpJ 4</span>
         <span class="badge">No server</span>
@@ -64,13 +70,7 @@
 
     <div class="card" style="margin-top:16px;">
       <h3 style="margin-top:0;">Setup (first time only)</h3>
-      <p class="small">For GitHub Pages, add <code class="kbd">/lib/cdk-bundle-2.9.jar</code> to your repo (from Maven Central). The page will load ~10–20&nbsp;MB of Java classes on first use.</p>
-      <ol class="small">
-        <li>Download <code>cdk-bundle-2.9.jar</code> from Maven Central and place it at <code>/lib/cdk-bundle-2.9.jar</code> in your repo.</li>
-        <li>Enable GitHub Pages (Settings → Pages → Deploy from branch).</li>
-        <li>Open your site. First load can take ~10–30s depending on network; subsequent loads are cached by the browser.</li>
-      </ol>
-      <p class="warn small">Note: In-browser IUPAC generation is experimental; for guaranteed PIN-grade names, use commercial namers.</p>
+      <p class="small">Add <code class="kbd">lib/cdk-bundle-2.9.jar</code> to this repo (from Maven Central). First load fetches the JAR, then it’s cached by your browser.</p>
     </div>
   </div>
 
@@ -85,7 +85,7 @@
   let cj = null;
   let initPromise = null;
 
-  // ---- progress helpers ----
+  // progress helpers
   function showProgress(){ progressWrap?.classList.remove('hidden'); }
   function hideProgress(){ progressWrap?.classList.add('hidden'); setProgress(0); }
   function setProgress(p, label){
@@ -95,12 +95,10 @@
   function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
   function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
 
-  // Choose likely jar paths (absolute /app and relative fallback)
-  function guessJarPath(){
-    return [
-      "/app/lib/cdk-bundle-2.9.jar",
-      "lib/cdk-bundle-2.9.jar",
-    ];
+  // Build a URL to lib/cdk-bundle-2.9.jar that works on project pages
+  function jarURL(){
+    // e.g., https://nickuhlig.github.io/smilestoiupac.github.io/lib/cdk-bundle-2.9.jar
+    return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString();
   }
 
   async function initCheerpJAndCDK() {
@@ -110,31 +108,21 @@
       showProgress(); setProgress(5, 'Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      setProgress(20, 'Loading CDK…');
-      let ok = false, lastErr;
-      for (const cand of guessJarPath()){
-        try {
-          // Capture the handle to the loaded Java library:
-          cj = await cheerpjRunLibrary(cand);
-          // Verify classes are exposed (fail early if not):
-          await cj.java.lang.Class.forName("org.openscience.cdk.iupac.IUPACNameGenerator");
-          ok = true; break;
-        } catch (e) {
-          lastErr = e; console.warn("CDK load failed for", cand, e);
-        }
-      }
-      if (!ok) {
-        setProgress(100, 'Failed to load CDK.');
-        cjState.textContent = 'error';
-        throw new Error("Could not load CDK JAR. Ensure lib/cdk-bundle-2.9.jar exists. Last error: " + lastErr);
-      }
+      setProgress(25, 'Loading CDK…');
+      const jar = jarURL();
+      // Load by fully-qualified URL (robust on project pages)
+      cj = await cheerpjRunLibrary(jar);
 
-      setProgress(90, 'Finalizing…');
+      // Verify classes are exposed
+      await cj.java.lang.Class.forName("org.openscience.cdk.iupac.IUPACNameGenerator");
+
       cjState.textContent = 'ready';
       setProgress(100, 'Runtime ready. Paste a SMILES and click Generate.');
       setTimeout(hideProgress, 600);
     })().catch(err => {
-      setStatus(String(err), 'err');
+      cjState.textContent = 'error';
+      setProgress(100, 'Init failed.');
+      setStatus('Failed to initialize: ' + err, 'err');
       throw err;
     });
     return initPromise;
@@ -143,7 +131,6 @@
   async function generateName(smiles) {
     await initCheerpJAndCDK();
 
-    // Access classes THROUGH the cj handle
     const DefaultChemObjectBuilder   = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
     const SmilesParser               = await cj.org.openscience.cdk.smiles.SmilesParser;
     const IUPACNameGenerator         = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
@@ -156,10 +143,10 @@
       showProgress(); setProgress(10, 'Parsing SMILES…');
       const mol = await sp.parseSmiles(smiles);
 
-      setProgress(45, 'Configuring atoms…');
+      setProgress(50, 'Configuring atoms…');
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-      setProgress(70, 'Generating IUPAC…');
+      setProgress(80, 'Generating IUPAC…');
       const name = await IUPACNameGenerator.generate(mol);
 
       setProgress(100, 'Done.'); setTimeout(hideProgress, 500);
@@ -171,7 +158,7 @@
     }
   }
 
-  // UI wiring
+  // UI
   document.getElementById('run').addEventListener('click', async () => {
     outEl.textContent = '';
     const smiles = (smilesEl.value || '').trim();
@@ -197,7 +184,7 @@
     smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
   });
 
-  // Preload runtime in background
+  // Preload runtime
   initCheerpJAndCDK();
 </script>
 </body>
