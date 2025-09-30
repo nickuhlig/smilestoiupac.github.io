@@ -17,7 +17,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y unzip zip curl
+          sudo apt-get install -y unzip zip curl coreutils
 
       - name: Prepare folders
         run: |
@@ -25,33 +25,44 @@ jobs:
           rm -rf bundle work
           mkdir -p bundle work lib
 
-      - name: Download jars (CDK 2.9 + Ambit 3.0.0) with retries
+      - name: Download + verify Maven jars (CDK 2.9)
         working-directory: work
         run: |
           set -euxo pipefail
 
-          dl() { # url outname
-            for i in 1 2 3; do
-              echo "Downloading $1 (attempt $i)..."
-              curl -L --fail --retry 3 --retry-all-errors -o "$2" "$1" && break || sleep 2
-            done
-            test -s "$2"
-            SIZE=$(stat -c%s "$2" || stat -f%z "$2" || echo 0)
-            # sanity check: >100 KB
-            if [ "$SIZE" -lt 102400 ]; then
-              echo "Downloaded file too small ($SIZE bytes): $2"
+          maven_dl() { # groupPath artifact version outname
+            BASE="https://repo1.maven.org/maven2/$1/$2/$3/$2-$3.jar"
+            SHA="${BASE}.sha1"
+            echo "Downloading $BASE"
+            curl -L --fail --retry 3 --retry-all-errors -o "$4" "$BASE"
+            echo "Downloading checksum $SHA"
+            curl -L --fail --retry 3 --retry-all-errors -o "$4.sha1" "$SHA"
+            EXP=$(tr -d ' \n\r' < "$4.sha1")
+            ACT=$(sha1sum "$4" | awk '{print $1}')
+            if [ "$EXP" != "$ACT" ]; then
+              echo "SHA1 mismatch for $4"
+              echo "Expected: $EXP"
+              echo "Actual:   $ACT"
               exit 1
             fi
+            # quick zip test
+            unzip -tq "$4"
           }
 
-          # CDK modules
-          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-interfaces/2.9/cdk-interfaces-2.9.jar" cdk-interfaces-2.9.jar
-          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-core/2.9/cdk-core-2.9.jar"             cdk-core-2.9.jar
-          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-smiles/2.9/cdk-smiles-2.9.jar"         cdk-smiles-2.9.jar
-          dl "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-dict/2.9/cdk-dict-2.9.jar"             cdk-dict-2.9.jar
+          maven_dl org/openscience/cdk cdk-interfaces 2.9 cdk-interfaces-2.9.jar
+          maven_dl org/openscience/cdk cdk-core       2.9 cdk-core-2.9.jar
+          maven_dl org/openscience/cdk cdk-smiles     2.9 cdk-smiles-2.9.jar
+          maven_dl org/openscience/cdk cdk-dict       2.9 cdk-dict-2.9.jar
 
-          # Ambit 3.0.0 — use SourceForge "downloads" which redirects to a mirror
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar" ambit2-structure2name-3.0.0.jar
+      - name: Download Ambit 3.0.0 jar (SourceForge) + zip test
+        working-directory: work
+        run: |
+          set -euxo pipefail
+          URL="https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar"
+          echo "Downloading $URL"
+          curl -L --fail --retry 3 --retry-all-errors -o ambit2-structure2name-3.0.0.jar "$URL"
+          # validate it's a real zip/jar, not an HTML error page
+          unzip -tq ambit2-structure2name-3.0.0.jar
 
       - name: Unpack all jars into bundle/
         run: |
@@ -71,15 +82,14 @@ jobs:
           zip -qr ../lib/iupac-mini-bundle.jar .
           cd ..
           ls -lh lib/iupac-mini-bundle.jar
-          # Hard fail if > 25 MiB (GitHub Pages limit)
           BYTES=$(stat -c%s lib/iupac-mini-bundle.jar || stat -f%z lib/iupac-mini-bundle.jar || echo 0)
           echo "Bundle size: $BYTES bytes"
           if [ "$BYTES" -gt $((25*1024*1024)) ]; then
-            echo "ERROR: iupac-mini-bundle.jar exceeds 25 MiB. Trim required."
+            echo "ERROR: iupac-mini-bundle.jar exceeds 25 MiB (GitHub Pages limit)."
             exit 1
           fi
 
-      - name: Upload bundle as artifact (for debugging/manual download)
+      - name: Upload bundle as artifact
         uses: actions/upload-artifact@v4
         with:
           name: iupac-mini-bundle.jar
@@ -89,7 +99,6 @@ jobs:
       - name: Commit mini-bundle into repo
         run: |
           set -euxo pipefail
-          # Only commit if changed/new
           if [ -n "$(git status --porcelain lib/iupac-mini-bundle.jar)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
