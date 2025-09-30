@@ -16,6 +16,7 @@
     .status { margin-top:10px; font-size:13px; color:#9fb0d6; }
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
+    .err { color:#ff6a6a }
   </style>
   <!-- CheerpJ v4 loader -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
@@ -48,15 +49,33 @@
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
 
-    let cj = null;       // CheerpJ library handle
-    let inited = false;  // guard to avoid double init
+    // CheerpJ + CDK handles
+    let cj = null;
+    let inited = false;
 
-    function setStatus(msg){ statusEl.textContent = msg; }
-    function log(msg){ const d=document.createElement('div'); d.textContent = msg; outEl.appendChild(d); }
+    function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+    function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // Resolve JAR URL relative to the site
-    function jarURL() {
-      return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString();
+    // Prefer Maven Central (CORS-enabled), then fall back to repo path
+    const MAVEN_JAR = "https://repo1.maven.org/maven2/org/openscience/cdk/cdk-bundle/2.9/cdk-bundle-2.9.jar";
+    function LOCAL_JAR(){ return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString(); }
+
+    async function fetchOk(url){
+      const u = url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+      const r = await fetch(u, { method:'HEAD', cache:'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      return url; // return the clean URL
+    }
+
+    async function resolveJarUrl(){
+      try { return await fetchOk(MAVEN_JAR); }
+      catch(e1){ console.warn('Maven Central fetch failed:', e1.message); }
+      try { return await fetchOk(LOCAL_JAR()); }
+      catch(e2){
+        throw new Error('Could not fetch CDK jar from Maven Central or local repo.\n' +
+                        'Last errors:\n- ' + e2.message + '\n' +
+                        'Tip: If you added the JAR with Git LFS, GitHub Pages will not serve it. Remove LFS and store it as a normal file, or rely on Maven Central.');
+      }
     }
 
     async function ensureInit() {
@@ -67,12 +86,15 @@
       setStatus('Loading CheerpJ runtime…');
       await cheerpjInit();
 
-      setStatus('Loading CDK (first time may take a while)…');
-      const jar = jarURL();
-      cj = await cheerpjRunLibrary(jar);
+      setStatus('Resolving CDK jar…');
+      const jarUrl = await resolveJarUrl();
 
-      // Verify by touching a class (no Class.forName needed)
+      setStatus('Loading CDK (first time may take a while)…');
+      cj = await cheerpjRunLibrary(jarUrl);
+
+      // Verify by touching classes (CheerpJ v4 pattern)
       await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
+      await cj.org.openscience.cdk.smiles.SmilesParser;
 
       cjState.textContent = 'ready';
       setStatus('Runtime ready. Paste a SMILES and click Generate.');
@@ -108,8 +130,8 @@
         setStatus('Done.');
       } catch (e) {
         console.error(e);
-        log('Error: ' + e);
-        setStatus('Failed. See error above.');
+        log('Error: ' + e, 'err');
+        setStatus('Failed. See error above.', 'err');
       }
     });
 
