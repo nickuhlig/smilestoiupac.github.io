@@ -87,67 +87,71 @@
   let cj = null;
   let cdkReadyPromise = null;
 
-  // --- progress helpers ---
-  function showProgress() {
-    progressWrap.classList.remove('hidden');
-    progressWrap.setAttribute('aria-hidden', 'false');
-  }
-  function hideProgress() {
-    progressWrap.classList.add('hidden');
-    progressWrap.setAttribute('aria-hidden', 'true');
-    setProgress(0);
-  }
-  function setProgress(pct, label) {
-    const p = Math.max(0, Math.min(100, pct|0));
-    progressBar.style.width = p + '%';
-    progressBar.setAttribute('aria-valuenow', String(p));
+  // ---- tiny progress helpers ----
+  function showProgress(){ progressWrap?.classList.remove('hidden'); }
+  function hideProgress(){ progressWrap?.classList.add('hidden'); setProgress(0); }
+  function setProgress(p, label){
+    if (progressBar){ progressBar.style.width = (p|0) + '%'; progressBar.setAttribute('aria-valuenow', String(p|0)); }
     if (label) setStatus(label);
   }
-  function startProgress(label, pct=5){ showProgress(); setProgress(pct,label); }
-  function finishProgress(label){ setProgress(100,label||'Done.'); setTimeout(hideProgress, 600); }
-  function failProgress(label){ setProgress(100,label||'Error'); }
+  function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
+  function log(msg, cls){ const d=document.createElement('div'); d.textContent = msg; if(cls) d.className=cls; outEl.appendChild(d); }
 
-  // --- logging/status ---
-  function log(msg, cls) {
-    const span = document.createElement('div');
-    span.textContent = msg;
-    if (cls) span.className = cls;
-    outEl.appendChild(span);
-  }
-  function setStatus(msg, cls) {
-    statusEl.textContent = msg;
-    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  // ---- helper: pick the correct JAR URL on GitHub Pages ----
+  function guessJarPath(){
+    // If your site URL is https://USER.github.io/REPO/, the file lives at /REPO/lib/cdk-bundle-2.9.jar
+    // CheerpJ maps "/app" to the site root at runtime.
+    // We'll try the most reliable two options in order.
+    return [
+      "/app/lib/cdk-bundle-2.9.jar",        // preferred for CheerpJ
+      "lib/cdk-bundle-2.9.jar",              // fallback (relative)
+    ];
   }
 
-  // --- CheerpJ + CDK init ---
   async function initCheerpJAndCDK() {
     if (cdkReadyPromise) return cdkReadyPromise;
-    cdkReadyPromise = new Promise(async (resolve, reject) => {
-      try {
-        cjState.textContent = 'loading…';
-        startProgress('Loading CheerpJ runtime…', 5);
-        await cheerpjInit();                      // runtime
-        setProgress(25, 'Loading CDK classes…');  // staged % (no streaming bytes)
-        cj = await cheerpjRunLibrary("/app/lib/cdk-bundle-2.9.jar"); // load JAR
-        setProgress(90, 'Finalizing…');
+    cdkReadyPromise = (async () => {
+      cjState.textContent = 'loading…';
+      showProgress(); setProgress(5, 'Loading CheerpJ runtime…');
+      await cheerpjInit();
+      setProgress(20, 'Loading CDK…');
 
-        cjState.textContent = 'ready';
-        finishProgress('Runtime ready. Paste a SMILES and click Generate.');
-        resolve();
-      } catch (e) {
-        cjState.textContent = 'error';
-        failProgress('Failed to initialize Java/CDK.');
-        setStatus('Failed to initialize Java/CDK: ' + e, 'err');
-        reject(e);
+      // Try candidate paths until one works
+      let lastErr; let ok = false;
+      for (const cand of guessJarPath()){
+        try {
+          // IMPORTANT: capture the handle; cheerpjRunLibrary returns a CJ3Library
+          cj = await cheerpjRunLibrary(cand);
+          // Prove classes are mapped: force load a known class
+          await cj.java.lang.Class.forName("org.openscience.cdk.iupac.IUPACNameGenerator");
+          ok = true;
+          break;
+        } catch(e){
+          lastErr = e;
+          console.warn("CDK load failed for", cand, e);
+        }
       }
+      if (!ok) {
+        setProgress(100, 'Failed to load CDK.');
+        cjState.textContent = 'error';
+        throw new Error("Could not load CDK JAR. Check that lib/cdk-bundle-2.9.jar exists in the repo. Last error: " + lastErr);
+      }
+
+      setProgress(90, 'Finalizing…');
+      cjState.textContent = 'ready';
+      setProgress(100, 'Runtime ready. Paste a SMILES and click Generate.');
+      setTimeout(hideProgress, 600);
+    })().catch(err => {
+      setStatus(String(err), 'err');
+      throw err;
     });
     return cdkReadyPromise;
   }
 
-  // --- naming ---
   async function generateName(smiles) {
     await initCheerpJAndCDK();
 
+    // Pull classes via the cj handle
     const DefaultChemObjectBuilder   = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
     const SmilesParser               = await cj.org.openscience.cdk.smiles.SmilesParser;
     const IUPACNameGenerator         = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
@@ -157,24 +161,26 @@
     const sp = await new SmilesParser(builder);
 
     try {
-      startProgress('Parsing SMILES…', 10);
+      showProgress(); setProgress(10, 'Parsing SMILES…');
       const mol = await sp.parseSmiles(smiles);
 
-      setProgress(40, 'Configuring atoms…');
+      setProgress(45, 'Configuring atoms…');
       await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-      setProgress(70, 'Generating IUPAC name…');
+      setProgress(70, 'Generating IUPAC…');
       const name = await IUPACNameGenerator.generate(mol);
 
-      finishProgress('Done.');
+      setProgress(100, 'Done.'); setTimeout(hideProgress, 500);
       return name ? String(name) : "<none>";
     } catch (e) {
-      failProgress('Error.');
-      throw new Error(String(e));
+      hideProgress();
+      // Surface full error for debugging
+      console.error("Naming error:", e);
+      throw new Error("Naming failed: " + (e && e.message ? e.message : String(e)));
     }
   }
 
-  // --- UI events ---
+  // ---- UI ----
   document.getElementById('run').addEventListener('click', async () => {
     outEl.textContent = '';
     const smiles = smilesEl.value.trim();
@@ -192,20 +198,18 @@
 
   document.getElementById('copy').addEventListener('click', async () => {
     const text = outEl.textContent.trim();
-    try { await navigator.clipboard.writeText(text);
-      setStatus('Copied to clipboard.', 'ok');
-    } catch { setStatus('Copy failed. Select and copy manually.', 'warn'); }
+    try { await navigator.clipboard.writeText(text); setStatus('Copied to clipboard.', 'ok'); }
+    catch { setStatus('Copy failed. Select and copy manually.', 'warn'); }
   });
 
   document.getElementById('clear').addEventListener('click', () => {
-    smilesEl.value = '';
-    outEl.textContent = '';
-    setStatus('Cleared.');
+    smilesEl.value = ''; outEl.textContent = ''; setStatus('Cleared.');
   });
 
   // Preload runtime in background
   initCheerpJAndCDK();
 </script>
+
 
 </body>
 </html>
