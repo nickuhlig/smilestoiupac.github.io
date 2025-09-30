@@ -132,28 +132,28 @@
     return initPromise;
   }
 
-  async function nameFromSmiles(smiles){
-    await ensureInit();
-    const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-    const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
-    const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-    const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
+ async function nameFromSmiles(smiles){
+  await ensureInit();
+  const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+  const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
+  const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+  const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
 
-    const builder = await DefaultChemObjectBuilder.getInstance();
-    const sp = new SmilesParser(builder);
-    const mol = await sp.parseSmiles(smiles);
-    await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
+  const builder = await DefaultChemObjectBuilder.getInstance();
+  const sp = await new SmilesParser(builder);          // <- await the constructor
+  const mol = await sp.parseSmiles(smiles);
+  await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-    if (typeof IUPAC.getInstance === 'function') {
-      const gen = await IUPAC.getInstance();
-      return String(await gen.generate(mol));
-    } else if (typeof IUPAC.generate === 'function') {
-      return String(await IUPAC.generate(mol));
-    } else {
-      const gen = new IUPAC();
-      return String(await gen.generate(mol));
-    }
+  if (typeof IUPAC.getInstance === 'function') {
+    const gen = await IUPAC.getInstance();
+    return String(await gen.generate(mol));
+  } else if (typeof IUPAC.generate === 'function') {
+    return String(await IUPAC.generate(mol));
+  } else {
+    const gen = await new IUPAC();                     // <- await the constructor
+    return String(await gen.generate(mol));
   }
+}
 
   // ----- UI events -----
   btnRun.addEventListener('click', async () => {
