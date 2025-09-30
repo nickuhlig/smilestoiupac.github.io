@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>SMILES → IUPAC (Ambit2 + CDK in browser)</title>
+  <title>SMILES → IUPAC (Ambit2 + CDK)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:#0b1020; color:#e9eefc; }
@@ -16,9 +16,6 @@
     .status { margin-top:10px; font-size:13px; color:#9fb0d6; }
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
-    .progress { position: relative; height: 10px; background: #1e2a55; border-radius: 999px; overflow: hidden; margin-top: 8px; }
-    .progress.hidden { display:none; }
-    .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg,#427bff,#6aa3ff); transition: width 200ms ease; }
     .err { color:#ff6a6a } .ok { color:#36cfc9 } .warn { color:#ffd166 }
   </style>
   <!-- CheerpJ v4 loader -->
@@ -29,165 +26,127 @@
     <div class="card">
       <h1>SMILES → IUPAC (Ambit2 + CDK, offline)</h1>
       <p style="margin:0 0 12px;color:#9fb0d6">
-        Runs entirely in your browser via CheerpJ. No server calls. JARs are served from this repo (same origin).
+        Runs entirely in your browser via CheerpJ. All jars served from this repo’s <code>lib/</code>.
       </p>
 
       <label for="smiles" style="font-size:12px;color:#9fb0d6">Isomeric SMILES</label>
-      <textarea id="smiles" placeholder="Paste an isomeric SMILES string…">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
+      <textarea id="smiles">CC(=O)OC1=CC=CC=C1C(=O)O</textarea>
 
       <div class="row">
         <button id="run" class="primary">Generate IUPAC</button>
-        <button id="copy">Copy output</button>
+        <button id="copy">Copy</button>
         <button id="clear">Clear</button>
         <span class="badge">Runtime: <span id="cjState">not loaded</span></span>
       </div>
 
-      <div id="status" class="status">Waiting for input…</div>
-      <div id="progressWrap" class="progress hidden" aria-hidden="true">
-        <div id="progressBar" class="progress-bar" role="progressbar"
-             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
-      </div>
+      <div id="status" class="status">Waiting…</div>
       <div id="output" class="out"></div>
     </div>
   </div>
 
-  <script>
-    // ---------- safe string ----------
-    function S(x){ try{
-      if (x==null) return String(x);
-      if (typeof x==='string') return x;
-      if (x instanceof Error) return x.message||x.toString();
-      const t=x.toString?.(); if (t && t!=='[object Object]') return t;
-      return JSON.stringify(x);
-    }catch{ return '<unprintable>'; } }
+<script>
+  function S(x){ try{
+    if(x==null) return String(x);
+    if(typeof x==='string') return x;
+    if(x instanceof Error) return x.message||x.toString();
+    const t=x.toString?.(); if(t && t!=='[object Object]') return t;
+    return JSON.stringify(x);
+  }catch{ return '<unprintable>'; } }
 
-    // ---------- UI ----------
-    const smilesEl=document.getElementById('smiles');
-    const outEl=document.getElementById('output');
-    const statusEl=document.getElementById('status');
-    const cjState=document.getElementById('cjState');
-    const progressWrap=document.getElementById('progressWrap');
-    const progressBar=document.getElementById('progressBar');
+  const smilesEl=document.getElementById('smiles');
+  const outEl=document.getElementById('output');
+  const statusEl=document.getElementById('status');
+  const cjState=document.getElementById('cjState');
 
-    function setStatus(msg,cls){ statusEl.textContent=S(msg); statusEl.className='status'+(cls?' '+cls:''); }
-    function log(msg,cls){ const d=document.createElement('div'); d.textContent=S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
-    function showProgress(){ progressWrap.classList.remove('hidden'); progressWrap.setAttribute('aria-hidden','false'); }
-    function hideProgress(){ progressWrap.classList.add('hidden'); progressWrap.setAttribute('aria-hidden','true'); setProgress(0); }
-    function setProgress(p,label){ const v=Math.max(0,Math.min(100,p|0)); progressBar.style.width=v+'%'; progressBar.setAttribute('aria-valuenow',String(v)); if(label) setStatus(label); }
+  function setStatus(msg,cls){ statusEl.textContent=S(msg); statusEl.className='status'+(cls?' '+cls:''); }
+  function log(msg,cls){ const d=document.createElement('div'); d.textContent=S(msg); if(cls) d.className=cls; outEl.appendChild(d); }
 
-    // ---------- CheerpJ + libs ----------
-    let cj=null, inited=false;
+  let cj=null, inited=false;
 
-    // absolute URL to /lib/ on this project page
-    function libURL(filename){
-      const parts=window.location.pathname.split('/').filter(Boolean);
-      const base=parts.length?('/'+parts[0]+'/'):'/';
-      return new URL('lib/'+filename, new URL(base, window.location.origin)).toString();
+  function libURL(f){
+    const parts=window.location.pathname.split('/').filter(Boolean);
+    const base=parts.length?('/'+parts[0]+'/'):'/';
+    return new URL('lib/'+f, new URL(base, window.location.origin)).toString();
+  }
+
+  const JARS=[
+    'cdk-interfaces-2.9.jar',
+    'cdk-core-2.9.jar',
+    'cdk-smiles-2.9.jar',
+    'cdk-dict-2.9.jar',
+    'ambit2-structure2name-3.0.0.jar'
+  ];
+
+  async function ensureInit(){
+    if(inited) return; inited=true;
+    cjState.textContent='loading…';
+    setStatus('Loading CheerpJ…');
+    await cheerpjInit();
+
+    // load jars sequentially
+    for (const f of JARS){
+      const url=libURL(f);
+      const head=await fetch(url+'?cb='+Date.now(),{method:'HEAD',cache:'no-store'});
+      if(!head.ok) throw new Error(`Missing ${f} (HTTP ${head.status})`);
+      cj=await cheerpjRunLibrary(url);
     }
 
-    // Local jars (must exist under /lib/)
-    const JARS = [
-      'cdk-interfaces-2.9.jar',
-      'cdk-core-2.9.jar',
-      'cdk-smiles-2.9.jar',
-      'cdk-dict-2.9.jar',
-      'ambit2-structure2name-2.7.4.jar'
-    ];
+    // verify classes
+    try{
+      await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
+      await (await cj).org.openscience.cdk.smiles.SmilesParser;
+      await (await cj).ambit2.structure2name.IUPACNameGenerator;
+    }catch(e){ throw new Error('Required classes not exposed: '+S(e)); }
 
-    async function ensureInit(){
-      if (inited) return; inited=true;
-      cjState.textContent='loading…';
-      showProgress(); setProgress(5,'Loading CheerpJ runtime…');
-      await cheerpjInit();
+    cjState.textContent='ready';
+    setStatus('Runtime ready. Paste a SMILES and click Generate.','ok');
+  }
 
-      setProgress(20,'Checking local JARs…');
-      for (const f of JARS){
-        const url=libURL(f);
-        const r=await fetch(url+'?cb='+Date.now(),{method:'HEAD',cache:'no-store'});
-        if(!r.ok){ hideProgress(); throw new Error(`Missing JAR: ${f} (HTTP ${r.status}). Put it in lib/`); }
-      }
+  async function nameFromSmiles(smiles){
+    await ensureInit();
+    const DefaultChemObjectBuilder=await cj.org.openscience.cdk.DefaultChemObjectBuilder;
+    const SmilesParser=await cj.org.openscience.cdk.smiles.SmilesParser;
+    const AtomContainerManipulator=await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
+    const IUPAC=await cj.ambit2.structure2name.IUPACNameGenerator;
 
-      setProgress(35,'Loading libraries…');
-      for (const [i,f] of JARS.entries()){
-        try {
-          const url=libURL(f);
-          cj = await cheerpjRunLibrary(url);
-          setProgress(35 + Math.round(((i+1)/JARS.length)*50), `Loading ${f}…`);
-        } catch(e){
-          hideProgress(); throw new Error(`Failed to load ${f}: `+S(e));
-        }
-      }
+    const builder=await DefaultChemObjectBuilder.getInstance();
+    const sp=new SmilesParser(builder);
+    const mol=await sp.parseSmiles(smiles);
+    await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
 
-      // Touch required classes
-      setProgress(90,'Finalizing…');
-      try {
-        await (await cj).org.openscience.cdk.DefaultChemObjectBuilder;
-        await (await cj).org.openscience.cdk.smiles.SmilesParser;
-        await (await cj).ambit2.structure2name.IUPACNameGenerator;
-      } catch(e){
-        hideProgress(); throw new Error('Required classes not exposed: '+S(e));
-      }
-
-      cjState.textContent='ready';
-      setProgress(100,'Runtime ready. Paste a SMILES and click Generate.');
-      setTimeout(hideProgress, 600);
+    // Ambit API has static + instance; try gracefully
+    if(typeof IUPAC.getInstance==='function'){
+      const gen=await IUPAC.getInstance();
+      return String(await gen.generate(mol));
+    }else if(typeof IUPAC.generate==='function'){
+      return String(await IUPAC.generate(mol));
+    }else{
+      const gen=new IUPAC();
+      return String(await gen.generate(mol));
     }
+  }
 
-    async function nameFromSmiles(smiles){
-      await ensureInit();
-
-      const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
-      const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
-      const AtomContainerManipulator = await cj.org.openscience.cdk.tools.manipulator.AtomContainerManipulator;
-      const IUPAC                    = await cj.ambit2.structure2name.IUPACNameGenerator;
-
-      const builder = await DefaultChemObjectBuilder.getInstance();
-      const sp = await new SmilesParser(builder);
-      const mol = await sp.parseSmiles(smiles);
-      await AtomContainerManipulator.percieveAtomTypesAndConfigureAtoms(mol);
-
-      // Ambit API: static method or instance; we’ll call static s2n method
-      // Try common entry points gracefully:
-      if (typeof IUPAC.getInstance === 'function') {
-        const gen = await IUPAC.getInstance();
-        const name = await gen.generate(mol);
-        return name ? String(name) : "<none>";
-      } else if (typeof IUPAC.generate === 'function') {
-        const name = await IUPAC.generate(mol);
-        return name ? String(name) : "<none>";
-      } else {
-        // Fallback older API
-        const gen = await new IUPAC();
-        const name = await gen.generate(mol);
-        return name ? String(name) : "<none>";
-      }
+  document.getElementById('run').addEventListener('click', async()=>{
+    outEl.textContent='';
+    const smiles=(smilesEl.value||'').trim();
+    if(!smiles){ setStatus('Enter SMILES'); return; }
+    setStatus('Generating…');
+    try{
+      const name=await nameFromSmiles(smiles);
+      log('IUPAC: '+name); setStatus('Done.','ok');
+    }catch(e){
+      console.error(e); log('Error: '+S(e),'err'); setStatus('Failed','err');
     }
+  });
 
-    // UI events
-    document.getElementById('run').addEventListener('click', async () => {
-      outEl.textContent='';
-      const smiles=(smilesEl.value||'').trim();
-      if(!smiles){ setStatus('Enter an isomeric SMILES.'); return; }
-      setStatus('Generating…');
-      try{
-        const name = await nameFromSmiles(smiles);
-        log('IUPAC: ' + name);
-        setStatus('Done.','ok');
-      }catch(e){
-        console.error(e);
-        log('Error: ' + S(e), 'err');
-        setStatus('Failed. See error above.','err');
-      }
-    });
+  document.getElementById('copy').addEventListener('click', async()=>{
+    try{ await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
+    catch(e){ setStatus('Copy failed: '+S(e),'warn'); }
+  });
 
-    document.getElementById('copy').addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(outEl.textContent.trim()); setStatus('Copied.','ok'); }
-      catch (e) { setStatus('Copy failed: ' + S(e),'warn'); }
-    });
-
-    document.getElementById('clear').addEventListener('click', () => {
-      smilesEl.value=''; outEl.textContent=''; setStatus('Cleared.');
-    });
-  </script>
+  document.getElementById('clear').addEventListener('click',()=>{
+    smilesEl.value=''; outEl.textContent=''; setStatus('Cleared.');
+  });
+</script>
 </body>
 </html>
