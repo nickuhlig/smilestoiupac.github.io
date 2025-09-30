@@ -17,7 +17,7 @@
     .out { white-space:pre-wrap; background:#0c1328; border:1px solid #1e2a55; border-radius:10px; padding:12px; margin-top:12px; min-height:48px; }
     .badge { font-size:12px; color:#9fb0d6; margin-left:8px; }
   </style>
-  <!-- CheerpJ v4 loader (only this; do NOT include any v3 script) -->
+  <!-- CheerpJ v4 loader -->
   <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
 </head>
 <body>
@@ -48,34 +48,31 @@
     const statusEl = document.getElementById('status');
     const cjState  = document.getElementById('cjState');
 
-    // CheerpJ + CDK handles
-    let cj = null;           // CJ3Library handle (set after loading the JAR)
-    let inited = false;      // we will init ONCE, on first click
+    let cj = null;       // CheerpJ library handle
+    let inited = false;  // guard to avoid double init
 
     function setStatus(msg){ statusEl.textContent = msg; }
     function log(msg){ const d=document.createElement('div'); d.textContent = msg; outEl.appendChild(d); }
 
-    // Build a URL that works on GitHub Pages project sites (repo-based)
+    // Resolve JAR URL relative to the site
     function jarURL() {
-      // Points to: <site-root>/lib/cdk-bundle-2.9.jar
       return new URL('lib/cdk-bundle-2.9.jar', window.location.href).toString();
     }
 
     async function ensureInit() {
-      if (inited) return;                // guard: init only once
+      if (inited) return;
       inited = true;
 
       cjState.textContent = 'loading…';
       setStatus('Loading CheerpJ runtime…');
-      await cheerpjInit();               // load the runtime
+      await cheerpjInit();
 
       setStatus('Loading CDK (first time may take a while)…');
       const jar = jarURL();
-      // Single call to runLibrary; capture the handle in `cj`
       cj = await cheerpjRunLibrary(jar);
 
-      // Prove classes are visible (fail early if not)
-      await cj.java.lang.Class.forName("org.openscience.cdk.iupac.IUPACNameGenerator");
+      // Verify by touching a class (no Class.forName needed)
+      await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
 
       cjState.textContent = 'ready';
       setStatus('Runtime ready. Paste a SMILES and click Generate.');
@@ -84,7 +81,6 @@
     async function nameFromSmiles(smiles) {
       await ensureInit();
 
-      // Access classes THROUGH the `cj` handle
       const DefaultChemObjectBuilder = await cj.org.openscience.cdk.DefaultChemObjectBuilder;
       const SmilesParser             = await cj.org.openscience.cdk.smiles.SmilesParser;
       const IUPACNameGenerator       = await cj.org.openscience.cdk.iupac.IUPACNameGenerator;
@@ -100,7 +96,7 @@
       return name ? String(name) : "<none>";
     }
 
-    // UI events (no preload; init happens on first click only)
+    // UI events
     document.getElementById('run').addEventListener('click', async () => {
       outEl.textContent = '';
       const smiles = (smilesEl.value || '').trim();
