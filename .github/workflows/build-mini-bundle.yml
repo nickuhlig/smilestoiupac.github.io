@@ -45,7 +45,7 @@ jobs:
               echo "Actual:   $ACT"
               exit 1
             fi
-            # quick zip test
+            # quick zip integrity test
             unzip -tq "$4"
           }
 
@@ -63,10 +63,13 @@ jobs:
             curl -L --fail --retry 3 --retry-all-errors -o "$2" "$1"
             unzip -tq "$2"
           }
-          # structure→name + dependencies
+          # Ambit deps required by structure2name
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-base-3.0.0.jar"          ambit2-base-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-core-3.0.0.jar"          ambit2-core-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-smarts-3.0.0.jar"        ambit2-smarts-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-tautomers-3.0.0.jar"     ambit2-tautomers-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-rules-3.0.0.jar"         ambit2-rules-3.0.0.jar
           dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar" ambit2-structure2name-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-core-3.0.0.jar"            ambit2-core-3.0.0.jar
-          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-smarts-3.0.0.jar"          ambit2-smarts-3.0.0.jar
 
       - name: Unpack all jars into bundle/
         run: |
@@ -77,9 +80,8 @@ jobs:
             echo "Unzipping $J"
             unzip -oq "$J" -d bundle
           done
-          # Remove signature files (avoid security metadata conflicts)
+          # Remove signature files & manifests to avoid conflicts
           find bundle -type f \( -name "*.SF" -o -name "*.DSA" -o -name "*.RSA" \) -delete
-          # Optional: remove all MANIFEST.MF so we don't mix multiple manifests
           find bundle -type f -name MANIFEST.MF -delete
 
       - name: Build combined JAR
@@ -110,7 +112,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add lib/iupac-mini-bundle.jar
-            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + Ambit 3.0.0)"
+            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + Ambit 3.0.0 modules)"
             git push
           else
             echo "No changes to commit."
