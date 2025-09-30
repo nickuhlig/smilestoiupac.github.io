@@ -68,12 +68,15 @@ jobs:
         run: |
           set -euxo pipefail
           shopt -s nullglob
+          # Extract with overwrite (-o) and quiet (-q) to avoid prompts
           for J in work/*.jar; do
             echo "Unzipping $J"
-            unzip -q "$J" -d bundle
+            unzip -oq "$J" -d bundle
           done
-          # Remove signature files to avoid manifest/signature conflicts
+          # Remove signature files (avoid security metadata conflicts)
           find bundle -type f \( -name "*.SF" -o -name "*.DSA" -o -name "*.RSA" \) -delete
+          # Optional: remove all MANIFEST.MF so we don't mix multiple manifests
+          find bundle -type f -name MANIFEST.MF -delete
 
       - name: Build combined JAR
         run: |
