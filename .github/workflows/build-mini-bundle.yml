@@ -54,15 +54,19 @@ jobs:
           maven_dl org/openscience/cdk cdk-smiles     2.9 cdk-smiles-2.9.jar
           maven_dl org/openscience/cdk cdk-dict       2.9 cdk-dict-2.9.jar
 
-      - name: Download Ambit 3.0.0 jar (SourceForge) + zip test
+      - name: Download Ambit 3.0.0 jars (SourceForge) + zip test
         working-directory: work
         run: |
           set -euxo pipefail
-          URL="https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar"
-          echo "Downloading $URL"
-          curl -L --fail --retry 3 --retry-all-errors -o ambit2-structure2name-3.0.0.jar "$URL"
-          # validate it's a real zip/jar, not an HTML error page
-          unzip -tq ambit2-structure2name-3.0.0.jar
+          dl() {
+            echo "Downloading $1"
+            curl -L --fail --retry 3 --retry-all-errors -o "$2" "$1"
+            unzip -tq "$2"
+          }
+          # structure→name + dependencies
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-structure2name-3.0.0.jar" ambit2-structure2name-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-core-3.0.0.jar"            ambit2-core-3.0.0.jar
+          dl "https://downloads.sourceforge.net/project/ambit/Ambit2/AMBIT_modules/3.0.0/ambit2-smarts-3.0.0.jar"          ambit2-smarts-3.0.0.jar
 
       - name: Unpack all jars into bundle/
         run: |
