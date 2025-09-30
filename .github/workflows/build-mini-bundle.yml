@@ -53,8 +53,10 @@ jobs:
           maven_dl org/openscience/cdk cdk-core       2.9 cdk-core-2.9.jar
           maven_dl org/openscience/cdk cdk-smiles     2.9 cdk-smiles-2.9.jar
           maven_dl org/openscience/cdk cdk-dict       2.9 cdk-dict-2.9.jar
-          # Missing earlier: tools (contains AtomContainerManipulator)
-          maven_dl org/openscience/cdk cdk-tools      2.9 cdk-tools-2.9.jar
+          # Correct module for AtomContainerManipulator (NOT cdk-tools)
+          maven_dl org/openscience/cdk cdk-standard   2.9 cdk-standard-2.9.jar
+          # cdk-standard depends on vecmath
+          maven_dl javax/vecmath        vecmath       1.5.2 vecmath-1.5.2.jar
 
       - name: Download Ambit 3.0.0 jars (SourceForge) + zip test
         working-directory: work
@@ -113,7 +115,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add lib/iupac-mini-bundle.jar
-            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + tools + Ambit 3.0.0 modules)"
+            git commit -m "Add/update iupac-mini-bundle.jar (CDK 2.9 + cdk-standard + vecmath + Ambit 3.0.0)"
             git push
           else
             echo "No changes to commit."
