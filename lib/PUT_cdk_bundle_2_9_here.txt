@@ -1,1 +1,0 @@
-Place cdk-bundle-2.9.jar in this folder. See README.md for the download link.
